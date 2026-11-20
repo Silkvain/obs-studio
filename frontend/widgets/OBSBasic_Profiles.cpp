@@ -17,6 +17,8 @@
 
 #include "OBSBasic.hpp"
 
+#include <utility/MultistreamManager.hpp>
+
 #ifdef YOUTUBE_ENABLED
 #include <docks/YouTubeAppDock.hpp>
 #endif
@@ -723,6 +725,9 @@ void OBSBasic::ActivateProfile(const OBSProfile &profile, bool reset)
 		NewYouTubeAppDock();
 	}
 #endif
+
+	if (multistream)
+		multistream->LoadForProfile(GetCurrentProfile().path);
 
 	OnEvent(OBS_FRONTEND_EVENT_PROFILE_CHANGED);
 

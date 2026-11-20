@@ -53,6 +53,12 @@ public:
 	OBSBasicControls(OBSBasic *main);
 	inline ~OBSBasicControls() {}
 
+public:
+	void SetDestinationsSummary(const QString &text);
+
+private:
+	QPointer<QPushButton> destinationsButton;
+
 signals:
 	void StreamButtonClicked();
 	void BroadcastButtonClicked();
@@ -64,6 +70,7 @@ signals:
 	void VirtualCamConfigButtonClicked();
 	void StudioModeButtonClicked();
 	void SettingsButtonClicked();
+	void DestinationsButtonClicked();
 
 	void StartStreamMenuActionClicked();
 	void StopStreamMenuActionClicked();

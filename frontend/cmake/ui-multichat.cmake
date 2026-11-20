@@ -1,0 +1,22 @@
+target_sources(
+  obs-studio
+  PRIVATE
+    multichat/ChatConnector.cpp
+    multichat/ChatConnector.hpp
+    multichat/ChatSocket.cpp
+    multichat/ChatSocket.hpp
+    multichat/ChatHub.cpp
+    multichat/ChatHub.hpp
+    multichat/KickChat.cpp
+    multichat/KickChat.hpp
+    multichat/MultichatDock.cpp
+    multichat/MultichatDock.hpp
+    multichat/ToggleSwitch.cpp
+    multichat/ToggleSwitch.hpp
+    multichat/RumbleChat.cpp
+    multichat/RumbleChat.hpp
+    multichat/TwitchChat.cpp
+    multichat/TwitchChat.hpp
+    multichat/YouTubeChat.cpp
+    multichat/YouTubeChat.hpp
+)

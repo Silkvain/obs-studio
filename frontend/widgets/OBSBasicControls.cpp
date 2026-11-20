@@ -46,6 +46,17 @@ OBSBasicControls::OBSBasicControls(OBSBasic *main) : QFrame(nullptr), ui(new Ui:
 		ui->settingsButton, &QPushButton::clicked, this, [this]() { emit this->SettingsButtonClicked(); },
 		Qt::DirectConnection);
 
+	/* Native multistreaming: destinations live in their own window */
+	destinationsButton = new QPushButton(QTStr("Multistream.DockTitle"), this);
+	destinationsButton->setObjectName(QStringLiteral("destinationsButton"));
+	destinationsButton->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+	destinationsButton->setMinimumWidth(150);
+	destinationsButton->setToolTip(QTStr("Multistream.ButtonTooltip"));
+	ui->buttonsVLayout->insertWidget(1, destinationsButton);
+	connect(
+		destinationsButton, &QPushButton::clicked, this, [this]() { emit this->DestinationsButtonClicked(); },
+		Qt::DirectConnection);
+
 	/* Transfer menu actions signals as OBSBasicControls signals */
 	connect(
 		startStreamAction.get(), &QAction::triggered, this,
@@ -282,4 +293,11 @@ void OBSBasicControls::EnableVirtualCamButtons()
 {
 	ui->virtualCamButton->setVisible(true);
 	ui->virtualCamConfigButton->setVisible(true);
+}
+
+void OBSBasicControls::SetDestinationsSummary(const QString &text)
+{
+	if (destinationsButton) {
+		destinationsButton->setText(text);
+	}
 }

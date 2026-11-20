@@ -60,6 +60,8 @@ class OBSMissingFiles;
 class OBSProjector;
 class ScreenshotObj;
 class VolumeControl;
+class MultistreamManager;
+class ChatHub;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
 #endif
@@ -444,6 +446,13 @@ public slots:
 	 */
 private:
 	QPointer<QDockWidget> statsDock;
+	QPointer<QWidget> multistreamWindow;
+	QPointer<QDockWidget> chatTargetsDock;
+	void ShowDestinations();
+	void UpdateDestinationsSummary();
+	MultistreamManager *multistream = nullptr;
+	QPointer<QDockWidget> multichatDock;
+	ChatHub *chatHub = nullptr;
 	QByteArray startingDockLayout;
 	QStringList extraDockNames;
 	QList<std::shared_ptr<QDockWidget>> extraDocks;

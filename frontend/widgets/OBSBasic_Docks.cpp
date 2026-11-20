@@ -87,13 +87,21 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	ui->mixerDock->setVisible(true);
 	ui->transitionsDock->setVisible(true);
 	controlsDock->setVisible(true);
+	chatTargetsDock->setVisible(true);
+	multichatDock->setVisible(true);
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
 
-	QList<QDockWidget *> bottomDocks{ui->mixerDock, ui->transitionsDock, controlsDock};
+	QList<QDockWidget *> bottomDocks{ui->mixerDock, ui->transitionsDock, controlsDock, chatTargetsDock};
 
-	resizeDocks(bottomDocks, {bottomDocksHeight, bottomDocksHeight, bottomDocksHeight}, Qt::Vertical);
-	resizeDocks(bottomDocks, {cx * 45 / 100, cx * 14 / 100, cx * 16 / 100}, Qt::Horizontal);
+	resizeDocks(bottomDocks, {bottomDocksHeight, bottomDocksHeight, bottomDocksHeight, bottomDocksHeight},
+		    Qt::Vertical);
+	/* Chat Sending is just icons + switches; give the rest to the others */
+	int sendW = 100;
+	int rest = std::max(cx - sendW, 0);
+	resizeDocks(bottomDocks, {rest * 55 / 100, rest * 20 / 100, rest * 25 / 100, sendW}, Qt::Horizontal);
+
+	resizeDocks({multichatDock}, {std::min(cx * 25 / 100, 380)}, Qt::Horizontal);
 
 	int sideDockWidth = std::min(width() * 30 / 100, 280);
 	resizeDocks({ui->scenesDock, ui->sourcesDock}, {sideDockWidth, sideDockWidth}, Qt::Horizontal);
@@ -117,6 +125,8 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	ui->transitionsDock->setFeatures(mainFeatures);
 	controlsDock->setFeatures(mainFeatures);
 	statsDock->setFeatures(features);
+	multichatDock->setFeatures(features);
+	chatTargetsDock->setFeatures(lock ? QDockWidget::NoDockWidgetFeatures : QDockWidget::DockWidgetMovable);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--) {
 		extraDocks[i]->setFeatures(features);

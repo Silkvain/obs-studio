@@ -23,6 +23,8 @@
 #include "ColorSelect.hpp"
 #include "OBSBasicControls.hpp"
 #include "OBSBasicStats.hpp"
+#include "docks/MultistreamDock.hpp"
+#include "multichat/MultichatDock.hpp"
 #include "plugin-manager/PluginManager.hpp"
 
 #include <obs-module.h>
@@ -71,6 +73,11 @@
 #endif
 
 #include "moc_OBSBasic.cpp"
+
+static OBSBasicControls *ControlsOf(QDockWidget *dock)
+{
+	return dock ? qobject_cast<OBSBasicControls *>(dock->widget()) : nullptr;
+}
 
 using namespace std;
 
@@ -246,6 +253,25 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	resizeDocks({ui->scenesDock, ui->sourcesDock}, {sideDockWidth, sideDockWidth}, Qt::Horizontal);
 	addDockWidget(Qt::BottomDockWidgetArea, controlsDock);
 
+	/* Multichat: which platforms your chat messages go to (ON/OFF switches) */
+	chatTargetsDock = new OBSDock();
+	chatTargetsDock->setObjectName(QStringLiteral("chatTargetsDock"));
+	/* Just the title: no float/close buttons on this small panel */
+	chatTargetsDock->setFeatures(QDockWidget::DockWidgetMovable);
+	chatTargetsDock->setStyleSheet(QStringLiteral("QDockWidget::title { text-align: center; }"));
+	chatTargetsDock->setWindowTitle(QTStr("Multichat.TargetsTitle"));
+	addDockWidget(Qt::BottomDockWidgetArea, chatTargetsDock);
+	splitDockWidget(controlsDock, chatTargetsDock, Qt::Horizontal);
+
+	/* Multichat: every platform's chat in one feed, on the right like Streamlabs */
+	multichatDock = new OBSDock();
+	multichatDock->setObjectName(QStringLiteral("multichatDock"));
+	multichatDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
+				   QDockWidget::DockWidgetFloatable);
+	multichatDock->setWindowTitle(QTStr("Multichat.DockTitle"));
+	addDockWidget(Qt::RightDockWidgetArea, multichatDock);
+	resizeDocks({multichatDock}, {std::min(width() * 25 / 100, 380)}, Qt::Horizontal);
+
 	startingDockLayout = saveState();
 
 	statsDock = new OBSDock();
@@ -418,6 +444,8 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(ui->transitionsDock);
 	SETUP_DOCK(controlsDock);
 	SETUP_DOCK(statsDock);
+	SETUP_DOCK(chatTargetsDock);
+	SETUP_DOCK(multichatDock);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -1089,6 +1117,30 @@ void OBSBasic::OBSInit()
 	OBSBasicStats *statsDlg = new OBSBasicStats(statsDock, false);
 	statsDock->setWidget(statsDlg);
 
+	/* setup native multistreaming */
+	multistream = new MultistreamManager(this);
+	multistream->LoadForProfile(GetCurrentProfile().path);
+	multistreamWindow = new QWidget(this, Qt::Window | Qt::Tool);
+	multistreamWindow->setWindowTitle(QTStr("Multistream.WindowTitle"));
+	multistreamWindow->resize(540, 380);
+	{
+		QVBoxLayout *l = new QVBoxLayout(multistreamWindow);
+		l->setContentsMargins(6, 6, 6, 6);
+		l->addWidget(new MultistreamDock(multistreamWindow, multistream));
+	}
+	connect(ControlsOf(controlsDock), &OBSBasicControls::DestinationsButtonClicked, this, &OBSBasic::ShowDestinations);
+	connect(multistream, &MultistreamManager::DestinationsChanged, this, &OBSBasic::UpdateDestinationsSummary);
+	connect(multistream, &MultistreamManager::StatusChanged, this, &OBSBasic::UpdateDestinationsSummary);
+	connect(this, &OBSBasic::StreamingStarted, this, &OBSBasic::UpdateDestinationsSummary);
+	connect(this, &OBSBasic::StreamingStopped, this, &OBSBasic::UpdateDestinationsSummary);
+	UpdateDestinationsSummary();
+
+	/* setup multichat */
+	chatHub = new ChatHub(this);
+	multichatDock->setWidget(new MultichatDock(multichatDock, chatHub));
+	chatTargetsDock->setWidget(new ChatTargetsPanel(chatTargetsDock, chatHub));
+	chatHub->StartAll();
+
 	/* ----------------------------- */
 	/* add custom browser docks      */
 #if defined(BROWSER_AVAILABLE) && defined(YOUTUBE_ENABLED)
@@ -1134,6 +1186,17 @@ void OBSBasic::OBSInit()
 			config_remove_value(App()->GetUserConfig(), "BasicWindow", "DocksLocked");
 			config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 		}
+	}
+
+	/* Existing users: their saved layout predates the Destinations dock, so
+	 * show it once so the feature is discoverable. */
+	if (!config_get_bool(App()->GetUserConfig(), "Multichat", "TargetsIntroduced")) {
+		chatTargetsDock->setVisible(true);
+		config_set_bool(App()->GetUserConfig(), "Multichat", "TargetsIntroduced", true);
+	}
+	if (!config_get_bool(App()->GetUserConfig(), "Multichat", "DockIntroduced")) {
+		multichatDock->setVisible(true);
+		config_set_bool(App()->GetUserConfig(), "Multichat", "DockIntroduced", true);
 	}
 
 	bool docksLocked = config_get_bool(App()->GetUserConfig(), "BasicWindow", "DocksLocked");
@@ -1317,6 +1380,10 @@ void OBSBasic::applicationShutdown() noexcept
 	obs_hotkey_set_callback_routing_func(nullptr, nullptr);
 	ClearHotkeys();
 
+	if (multistream)
+		multistream->Shutdown();
+	if (chatHub)
+		chatHub->StopAll();
 	service = nullptr;
 	outputHandler.reset();
 
@@ -1999,6 +2066,33 @@ void OBSBasic::UpdateTitleBar()
 	name << " - " << Str("TitleBar.Scenes") << ": " << sceneCollection;
 
 	setWindowTitle(QT_UTF8(name.str().c_str()));
+}
+
+void OBSBasic::ShowDestinations()
+{
+	if (!multistreamWindow)
+		return;
+	if (!multistreamWindow->isVisible()) {
+		/* open centred over the main window */
+		multistreamWindow->move(frameGeometry().center() - multistreamWindow->rect().center());
+	}
+	multistreamWindow->show();
+	multistreamWindow->raise();
+	multistreamWindow->activateWindow();
+}
+
+void OBSBasic::UpdateDestinationsSummary()
+{
+	OBSBasicControls *c = ControlsOf(controlsDock);
+	if (!c || !multistream)
+		return;
+	int extra = multistream->EnabledCount();
+	QString text = QTStr("Multistream.DockTitle");
+	if (multistream->PrimaryActive())
+		text += QStringLiteral(" · %1/%2 live").arg(multistream->LiveCount() + 1).arg(extra + 1);
+	else if (extra > 0)
+		text += QStringLiteral(" (%1)").arg(extra + 1);
+	c->SetDestinationsSummary(text);
 }
 
 OBSBasic *OBSBasic::Get()

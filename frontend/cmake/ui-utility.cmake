@@ -23,6 +23,8 @@ target_sources(
     utility/MissingFilesModel.hpp
     utility/MissingFilesPathItemDelegate.cpp
     utility/MissingFilesPathItemDelegate.hpp
+    utility/MultistreamManager.cpp
+    utility/MultistreamManager.hpp
     utility/MultitrackVideoError.cpp
     utility/MultitrackVideoError.hpp
     utility/MultitrackVideoOutput.cpp
