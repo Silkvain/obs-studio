@@ -491,7 +491,10 @@ function(_bundle_dependencies target)
 
     list(APPEND plugin_stems ${plugin_stem})
 
-    if(plugin MATCHES "(.+d)\\.dll$" AND CMAKE_MATCH_COUNT EQUAL 1 AND NOT CMAKE_MATCH_1 IN_LIST debug_dll_exceptions)
+    # Compare the file name (not the full path) with the exception list: release
+    # builds of e.g. qschannelbackend.dll also end in "d" but aren't debug DLLs.
+    cmake_path(GET plugin STEM plugin_file_stem)
+    if(plugin MATCHES "(.+d)\\.dll$" AND CMAKE_MATCH_COUNT EQUAL 1 AND NOT plugin_file_stem IN_LIST debug_dll_exceptions)
       list(APPEND plugin_${plugin_stem}_debug ${plugin})
     else()
       list(APPEND plugin_${plugin_stem} ${plugin})
