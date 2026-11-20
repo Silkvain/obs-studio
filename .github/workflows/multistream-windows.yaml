@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # to publish the installer as a GitHub Release
 
 jobs:
   windows-x64:
@@ -46,9 +46,53 @@ jobs:
           config: RelWithDebInfo
           package: true
 
-      - name: Upload zip 📡
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: obs-multistream-multichat-windows-x64
-          path: ${{ github.workspace }}/build_x64/obs-studio-*-windows-x64.zip
-          if-no-files-found: error
+      - name: Build installer 📦
+        run: |
+          $zip = Get-ChildItem build_x64 -Filter 'obs-studio-*-windows-x64.zip' | Select-Object -First 1
+          if (-not $zip) { throw 'Packaged zip not found' }
+          $version = $zip.BaseName -replace '^obs-studio-', '' -replace '-windows-x64$', ''
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+
+          # Microsoft Visual C++ runtime, bundled so the installer works on a fresh PC
+          Invoke-WebRequest -Uri 'https://aka.ms/vc14/vc_redist.x64.exe' -OutFile vc_redist.x64.exe
+
+          $makensis = 'C:\Program Files (x86)\NSIS\makensis.exe'
+          if (-not (Test-Path $makensis)) {
+            choco install nsis -y --no-progress
+          }
+          & $makensis /V2 `
+            "/DAPPVERSION=$version" `
+            "/DSRCDIR=$PWD\staging" `
+            "/DVCREDIST=$PWD\vc_redist.x64.exe" `
+            "/DREPOROOT=$PWD" `
+            "/DOUTFILE=$PWD\dist\OBS-Multistream-Setup-$version.exe" `
+            .github\installer\obs-multistream.nsi
+          if ($LASTEXITCODE -ne 0) { throw 'makensis failed' }
+
+          # Portable version: one plain zip (no zip-inside-a-zip)
+          Copy-Item $zip.FullName "dist\OBS-Multistream-Portable-$version.zip"
+          Get-ChildItem dist
+
+      - name: Publish release 🚀
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "multistream-build-${{ github.run_number }}"
+          $notes = @"
+          **Install:** download ``OBS-Multistream-Setup-$env:VERSION.exe`` and run it. It installs alongside regular OBS (separate folder, same settings) and adds Start Menu and desktop shortcuts.
+
+          **Portable:** or unzip ``OBS-Multistream-Portable-$env:VERSION.zip`` anywhere and run ``bin\64bit\obs64.exe``.
+
+          The build isn't code-signed, so Windows SmartScreen may warn on first run: *More info → Run anyway*.
+
+          Built from ${{ github.sha }}.
+          "@
+          gh release create $tag (Get-ChildItem dist).FullName `
+            --target ${{ github.sha }} `
+            --title "OBS Multistream $env:VERSION (build ${{ github.run_number }})" `
+            --notes $notes `
+            --latest
