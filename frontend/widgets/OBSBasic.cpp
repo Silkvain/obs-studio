@@ -2049,12 +2049,11 @@ void OBSBasic::UpdateTitleBar()
 	const char *profile = config_get_string(App()->GetUserConfig(), "Basic", "Profile");
 	const char *sceneCollection = config_get_string(App()->GetUserConfig(), "Basic", "SceneCollection");
 
-	name << "OBS ";
+	/* Siegfried: our own name, with the OBS version it's built on */
+	name << "Siegfried (OBS " << App()->GetVersionString(false) << ")";
 	if (previewProgramMode) {
-		name << "Studio ";
+		name << " - " << Str("StudioMode.Preview");
 	}
-
-	name << App()->GetVersionString(false);
 	if (safe_mode) {
 		name << " (" << Str("TitleBar.SafeMode") << ")";
 	}

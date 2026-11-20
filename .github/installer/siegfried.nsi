@@ -1,4 +1,4 @@
-; OBS Studio Multistream - Windows installer
+; Siegfried - Windows installer (a fork of OBS Studio)
 ;
 ; Built by .github/workflows/multistream-windows.yaml from the packaged
 ; build. Installs alongside (not over) an official OBS Studio install.
@@ -22,13 +22,13 @@ SetCompressor /SOLID lzma
   !define APPVERSION "0.0.0"
 !endif
 !ifndef OUTFILE
-  !define OUTFILE "OBS-Multistream-Setup.exe"
+  !define OUTFILE "Siegfried-Setup.exe"
 !endif
 
-!define APPNAME "OBS Studio Multistream"
-!define SHORTNAME "OBS Multistream"
+!define APPNAME "Siegfried"
+!define SHORTNAME "Siegfried"
 !define PUBLISHER "Silkvain"
-!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OBSStudioMultistream"
+!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Siegfried"
 !define EXE "bin\64bit\obs64.exe"
 
 Name "${APPNAME}"
