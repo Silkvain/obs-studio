@@ -31,7 +31,11 @@ jobs:
       - name: Fetch version tags 🏷️
         # Forks don't copy upstream tags, but OBS derives its version from
         # `git describe`, so pull the release tags from the official repo.
-        run: git fetch --force https://github.com/obsproject/obs-studio.git "refs/tags/*:refs/tags/*"
+        run: |
+          git fetch --force https://github.com/obsproject/obs-studio.git "refs/tags/*:refs/tags/*"
+          # Our own release tags (multistream-build-N) aren't version numbers;
+          # drop them locally so `git describe` finds the OBS release tag.
+          git tag -l 'multistream-build-*' | ForEach-Object { git tag -d $_ } | Out-Null
 
       - name: Build OBS Studio 🧱
         uses: ./.github/actions/build-obs
