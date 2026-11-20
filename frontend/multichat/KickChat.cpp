@@ -81,8 +81,8 @@ KickChat::KickChat(QObject *parent) : ChatConnector(ChatPlatform::Kick, parent)
 
 QString KickChat::LoginRequirement() const
 {
-	if (Str("client_id").trimmed().isEmpty() || Str("client_secret").trimmed().isEmpty()) {
-		return tr("Add your Kick app's Client ID and Client Secret first.");
+	if (ClientId().isEmpty()) {
+		return tr("This build has no Kick app built in. Add a Client ID under Advanced.");
 	}
 	return {};
 }
@@ -374,7 +374,7 @@ void KickChat::Login(QWidget *)
 	QUrl url(IdBase() + "/oauth/authorize");
 	QUrlQuery q;
 	q.addQueryItem("response_type", "code");
-	q.addQueryItem("client_id", Str("client_id").trimmed());
+	q.addQueryItem("client_id", ClientId());
 	q.addQueryItem("redirect_uri", oauth->RedirectUri());
 	q.addQueryItem("scope", kScopes);
 	q.addQueryItem("state", oauth->State());
@@ -387,12 +387,15 @@ void KickChat::Login(QWidget *)
 		oauth->deleteLater();
 	});
 	connect(oauth, &LoopbackOAuth::CodeReceived, this, [this, oauth](const QString &code) {
-		QByteArray body = Form({{"grant_type", "authorization_code"},
-					{"client_id", Str("client_id").trimmed()},
-					{"client_secret", Str("client_secret").trimmed()},
-					{"redirect_uri", oauth->RedirectUri()},
-					{"code_verifier", oauth->CodeVerifier()},
-					{"code", code}});
+		QList<QPair<QString, QString>> fields{{"grant_type", "authorization_code"},
+						      {"client_id", ClientId()},
+						      {"redirect_uri", oauth->RedirectUri()},
+						      {"code_verifier", oauth->CodeVerifier()},
+						      {"code", code}};
+		if (!ClientSecret().isEmpty()) {
+			fields.append({"client_secret", ClientSecret()});
+		}
+		QByteArray body = Form(fields);
 		oauth->deleteLater();
 		Request("POST", QUrl(IdBase() + "/oauth/token"), {}, body, "application/x-www-form-urlencoded",
 			[this](int status, const QJsonObject &obj, const QByteArray &raw) {
@@ -416,6 +419,7 @@ void KickChat::Login(QWidget *)
 						if (Slug().isEmpty()) {
 							config["channel"] = config["user_login"];
 						}
+						config["enabled"] = true;
 					}
 					emit ConfigChanged();
 					EmitNotice(tr("Logged in to Kick as %1").arg(Str("user_name")));
@@ -434,10 +438,13 @@ void KickChat::RefreshToken(std::function<void(bool)> done)
 		done(false);
 		return;
 	}
-	QByteArray body = Form({{"grant_type", "refresh_token"},
-				{"client_id", Str("client_id").trimmed()},
-				{"client_secret", Str("client_secret").trimmed()},
-				{"refresh_token", refresh}});
+	QList<QPair<QString, QString>> fields{{"grant_type", "refresh_token"},
+					      {"client_id", ClientId()},
+					      {"refresh_token", refresh}};
+	if (!ClientSecret().isEmpty()) {
+		fields.append({"client_secret", ClientSecret()});
+	}
+	QByteArray body = Form(fields);
 	Request("POST", QUrl(IdBase() + "/oauth/token"), {}, body, "application/x-www-form-urlencoded",
 		[this, done](int status, const QJsonObject &obj, const QByteArray &) {
 			if (status != 200) {

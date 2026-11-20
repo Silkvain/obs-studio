@@ -109,7 +109,15 @@ protected:
 	void SetState(ChatState s, const QString &text = {});
 	void EmitNotice(const QString &text, bool error = false) { emit Notice(platform, text, error); }
 	QString Str(const char *key) const { return config.value(key).toString(); }
+	/* The app registration to use: the user's own (Advanced) if set,
+	 * otherwise the one built into this build. */
+	QString ClientId() const;
+	QString ClientSecret() const;
 
+public:
+	bool HasBuiltinApp() const;
+
+protected:
 	/* Small helper for JSON REST calls. The callback gets the HTTP status
 	 * (0 on network failure) and the parsed body. */
 	using JsonCallback = std::function<void(int status, const QJsonObject &body, const QByteArray &raw)>;

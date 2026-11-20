@@ -83,7 +83,8 @@ TwitchChat::TwitchChat(QObject *parent) : ChatConnector(ChatPlatform::Twitch, pa
 
 QString TwitchChat::LoginRequirement() const
 {
-	return Str("client_id").trimmed().isEmpty() ? tr("Add your Twitch Client ID first.") : QString();
+	return ClientId().isEmpty() ? tr("This build has no Twitch app built in. Add a Client ID under Advanced.")
+				    : QString();
 }
 
 /* ------------------------------------------------------------------------ */
@@ -284,7 +285,7 @@ void TwitchChat::Helix(const QByteArray &verb, const QString &path, const QJsonO
 		       std::function<void(int, const QJsonObject &)> cb, bool retried)
 {
 	QList<QPair<QByteArray, QByteArray>> headers{
-		{"Client-Id", Str("client_id").trimmed().toUtf8()},
+		{"Client-Id", ClientId().toUtf8()},
 		{"Authorization", "Bearer " + Str("access_token").toUtf8()},
 	};
 	QByteArray data = body.isEmpty() ? QByteArray() : QJsonDocument(body).toJson(QJsonDocument::Compact);
@@ -395,7 +396,7 @@ void TwitchChat::Unban(const ChatUser &user)
 
 void TwitchChat::Login(QWidget *parent)
 {
-	QString clientId = Str("client_id").trimmed();
+	QString clientId = ClientId();
 	if (clientId.isEmpty()) {
 		EmitNotice(LoginRequirement(), true);
 		return;
@@ -415,10 +416,10 @@ void TwitchChat::Login(QWidget *parent)
 
 			QDialog *dlg = new QDialog(parent);
 			dlg->setAttribute(Qt::WA_DeleteOnClose);
-			dlg->setWindowTitle(tr("Log in to Twitch"));
+			dlg->setWindowTitle(tr("Connect Twitch"));
 			QVBoxLayout *l = new QVBoxLayout(dlg);
-			l->addWidget(
-				new QLabel(tr("Your browser will open twitch.tv/activate. Confirm this code there:")));
+			l->addWidget(new QLabel(tr(
+				"Your browser is opening Twitch. Click <b>Authorize</b> there.<br>If Twitch asks for a code, enter:")));
 			QLabel *code = new QLabel(userCode);
 			QFont f = code->font();
 			f.setPointSize(f.pointSize() * 2);
@@ -450,7 +451,7 @@ void TwitchChat::PollDeviceToken(const QString &deviceCode, int interval)
 	devicePollTimer.disconnect();
 	devicePollTimer.setInterval(interval * 1000);
 	connect(&devicePollTimer, &QTimer::timeout, this, [this, deviceCode] {
-		QByteArray body = Form({{"client_id", Str("client_id").trimmed()},
+		QByteArray body = Form({{"client_id", ClientId()},
 					{"scopes", kScopes},
 					{"device_code", deviceCode},
 					{"grant_type", "urn:ietf:params:oauth:grant-type:device_code"}});
@@ -484,6 +485,7 @@ void TwitchChat::PollDeviceToken(const QString &deviceCode, int interval)
 						if (Channel().isEmpty()) {
 							config["channel"] = u.value("login").toString();
 						}
+						config["enabled"] = true;
 					}
 					broadcasterId.clear();
 					emit ConfigChanged();
@@ -505,9 +507,8 @@ void TwitchChat::RefreshToken(std::function<void(bool)> done)
 		done(false);
 		return;
 	}
-	QByteArray body = Form({{"client_id", Str("client_id").trimmed()},
-				{"grant_type", "refresh_token"},
-				{"refresh_token", refresh}});
+	QByteArray body =
+		Form({{"client_id", ClientId()}, {"grant_type", "refresh_token"}, {"refresh_token", refresh}});
 	Request("POST", QUrl(IdBase() + "/oauth2/token"), {}, body, "application/x-www-form-urlencoded",
 		[this, done](int status, const QJsonObject &obj, const QByteArray &) {
 			if (status != 200) {

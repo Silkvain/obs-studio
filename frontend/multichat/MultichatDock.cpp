@@ -362,50 +362,37 @@ void ChatUserCard::Moderate(int seconds)
 ChatAccountsDialog::ChatAccountsDialog(ChatHub *hub_, QWidget *parent) : QDialog(parent), hub(hub_)
 {
 	setWindowTitle(tr("Chat Accounts"));
-	setMinimumWidth(560);
+	setMinimumWidth(520);
 	QVBoxLayout *layout = new QVBoxLayout(this);
 	QTabWidget *tabWidget = new QTabWidget(this);
 
-	tabWidget->addTab(
-		BuildTab(ChatPlatform::Twitch, {{"channel", tr("Channel")}, {"client_id", tr("Client ID")}},
-			 tr("Reading chat works with just a channel name. To send messages and moderate, create a free "
-			    "app at dev.twitch.tv/console/apps (Client Type: Public, OAuth Redirect URL: "
-			    "http://localhost), paste its Client ID here and log in. Login uses a short code, "
-			    "so no redirect setup is needed."),
-			 true, {}),
-		QIcon(ChatBadge(ChatPlatform::Twitch, 16)), "Twitch");
+	tabWidget->addTab(BuildTab(ChatPlatform::Twitch, {{"channel", tr("Channel"), tr("your own channel"), false}},
+				   {{"client_id", tr("Client ID"), tr("built in"), false}},
+				   tr("Only needed if you want to use your own Twitch developer app."), true),
+			  QIcon(ChatBadge(ChatPlatform::Twitch, 16)), "Twitch");
 
-	tabWidget->addTab(
-		BuildTab(ChatPlatform::Kick,
-			 {{"channel", tr("Channel")},
-			  {"chatroom_id", tr("Chatroom ID")},
-			  {"client_id", tr("Client ID")},
-			  {"client_secret", tr("Client Secret")}},
-			 tr("Reading chat works with just a channel name. If Kick blocks the automatic lookup, open "
-			    "kick.com/api/v2/channels/<your-channel> in a browser and copy \"chatroom\" → \"id\" into "
-			    "Chatroom ID. To send and moderate, create an app in kick.com → Settings → Developer with "
-			    "Redirect URL http://localhost:%1/callback and the chat:write, moderation:ban, user:read and "
-			    "channel:read scopes, then paste its Client ID and Secret and log in.")
-				 .arg(KickChat::kRedirectPort),
-			 true, {"client_secret"}),
-		QIcon(ChatBadge(ChatPlatform::Kick, 16)), "Kick");
+	tabWidget->addTab(BuildTab(ChatPlatform::Kick, {{"channel", tr("Channel"), tr("your own channel"), false}},
+				   {{"chatroom_id", tr("Chatroom ID"), tr("found automatically"), false},
+				    {"client_id", tr("Client ID"), tr("built in"), false},
+				    {"client_secret", tr("Client Secret"), tr("built in"), true}},
+				   tr("Chatroom ID: only if chat doesn't load. Open kick.com/api/v2/channels/<channel> "
+				      "in a browser and copy \"chatroom\" → \"id\". Client ID/Secret: only for your "
+				      "own Kick app (redirect http://localhost:%1/callback).")
+					   .arg(KickChat::kRedirectPort),
+				   true),
+			  QIcon(ChatBadge(ChatPlatform::Kick, 16)), "Kick");
 
-	tabWidget->addTab(
-		BuildTab(ChatPlatform::YouTube,
-			 {{"client_id", tr("Client ID")}, {"client_secret", tr("Client Secret")}},
-			 tr("YouTube needs a login even to read chat. In console.cloud.google.com, enable the YouTube "
-			    "Data API v3, create an OAuth client of type \"Desktop app\", paste its ID and secret, "
-			    "then log in. Chat appears automatically when you go live. Polling chat uses your "
-			    "project's daily API quota."),
-			 true, {"client_secret"}),
-		QIcon(ChatBadge(ChatPlatform::YouTube, 16)), "YouTube");
+	tabWidget->addTab(BuildTab(ChatPlatform::YouTube, {},
+				   {{"client_id", tr("Client ID"), tr("built in"), false},
+				    {"client_secret", tr("Client Secret"), tr("built in"), true}},
+				   tr("Only needed for your own Google OAuth client (type: Desktop app, with the "
+				      "YouTube Data API v3 enabled)."),
+				   true),
+			  QIcon(ChatBadge(ChatPlatform::YouTube, 16)), "YouTube");
 
-	tabWidget->addTab(
-		BuildTab(ChatPlatform::Rumble, {{"api_url", tr("Live Stream API URL")}},
-			 tr("Create your URL at rumble.com/account/livestream-api and paste it here. Treat it "
-			    "like a password. Rumble's API is read-only: no sending or moderation."),
-			 false, {"api_url"}),
-		QIcon(ChatBadge(ChatPlatform::Rumble, 16)), "Rumble");
+	tabWidget->addTab(BuildTab(ChatPlatform::Rumble,
+				   {{"api_url", tr("Live Stream API URL"), tr("paste it here"), true}}, {}, {}, false),
+			  QIcon(ChatBadge(ChatPlatform::Rumble, 16)), "Rumble");
 
 	layout->addWidget(tabWidget);
 
@@ -431,47 +418,58 @@ ChatAccountsDialog::ChatAccountsDialog(ChatHub *hub_, QWidget *parent) : QDialog
 			it->second.status->setText(text);
 		}
 	});
+	for (ChatConnector *c : hub->Connectors()) {
+		ChatPlatform p = c->Platform();
+		connect(c, &ChatConnector::ConfigChanged, this, [this, p] { SyncFromConfig(p); });
+	}
 }
 
-QWidget *ChatAccountsDialog::BuildTab(ChatPlatform p, const QList<QPair<QString, QString>> &fields, const QString &help,
-				      bool hasLogin, const QStringList &secretKeys)
+QWidget *ChatAccountsDialog::BuildTab(ChatPlatform p, const QList<Field> &main, const QList<Field> &advanced,
+				      const QString &advancedHelp, bool hasLogin)
 {
 	ChatConnector *c = hub->Connector(p);
-	Fields &tf = tabs[int(p)];
+	Tab &tab = tabs[int(p)];
+	QString name = ChatPlatformName(p);
 
 	QWidget *page = new QWidget();
 	QVBoxLayout *v = new QVBoxLayout(page);
-	tf.enabled = new QCheckBox(tr("Show %1 chat").arg(ChatPlatformName(p)), page);
-	tf.enabled->setChecked(c->Enabled());
-	v->addWidget(tf.enabled);
+	v->setSpacing(10);
 
-	QFormLayout *form = new QFormLayout();
-	for (const auto &field : fields) {
-		QLineEdit *e = new QLineEdit(c->Config().value(field.first).toString(), page);
-		if (secretKeys.contains(field.first)) {
+	auto makeEdit = [&](const Field &f) {
+		QLineEdit *e = new QLineEdit(c->Config().value(f.key).toString(), page);
+		e->setPlaceholderText(f.placeholder);
+		if (f.secret) {
 			e->setEchoMode(QLineEdit::PasswordEchoOnEdit);
 		}
-		if (field.first == "chatroom_id") {
-			e->setPlaceholderText(tr("optional, found automatically"));
-		}
-		tf.edits[field.first] = e;
-		form->addRow(field.second, e);
-	}
-	v->addLayout(form);
-
-	QLabel *helpLabel = new QLabel(help, page);
-	helpLabel->setWordWrap(true);
-	helpLabel->setStyleSheet("color:#9aa3b2");
-	v->addWidget(helpLabel);
+		tab.edits[f.key] = e;
+		return e;
+	};
 
 	if (hasLogin) {
+		/* Account: who you're connected as, and one button */
 		QHBoxLayout *row = new QHBoxLayout();
-		tf.login = new QPushButton(tr("Log in to %1").arg(ChatPlatformName(p)), page);
-		tf.logout = new QPushButton(tr("Log out"), page);
-		connect(tf.login, &QPushButton::clicked, this, [this, p] {
+		QLabel *badge = new QLabel(page);
+		badge->setPixmap(ChatBadge(p, 32));
+		row->addWidget(badge);
+		tab.account = new QLabel(page);
+		QFont f = tab.account->font();
+		f.setPointSizeF(f.pointSizeF() * 1.15);
+		f.setBold(true);
+		tab.account->setFont(f);
+		row->addWidget(tab.account, 1);
+		tab.connect = new QPushButton(page);
+		tab.connect->setMinimumWidth(150);
+		tab.connect->setMinimumHeight(32);
+		connect(tab.connect, &QPushButton::clicked, this, [this, p] {
+			ChatConnector *conn = hub->Connector(p);
+			if (conn->LoggedIn()) {
+				conn->Logout();
+				tabs[int(p)].status->clear();
+				RefreshStatus(p);
+				return;
+			}
 			Apply(p);
 			hub->Save();
-			ChatConnector *conn = hub->Connector(p);
 			QString req = conn->LoginRequirement();
 			if (!req.isEmpty()) {
 				tabs[int(p)].status->setStyleSheet("color:#ff8a80");
@@ -479,23 +477,73 @@ QWidget *ChatAccountsDialog::BuildTab(ChatPlatform p, const QList<QPair<QString,
 				return;
 			}
 			tabs[int(p)].status->setStyleSheet("");
-			tabs[int(p)].status->setText(tr("Finish logging in in your browser…"));
+			tabs[int(p)].status->setText(tr("Finish connecting in your browser…"));
 			conn->Login(this);
 		});
-		connect(tf.logout, &QPushButton::clicked, this, [this, p] {
-			hub->Connector(p)->Logout();
-			RefreshStatus(p);
-		});
-		row->addWidget(tf.login);
-		row->addWidget(tf.logout);
-		row->addStretch();
+		row->addWidget(tab.connect);
 		v->addLayout(row);
 	}
 
-	tf.status = new QLabel(page);
-	tf.status->setWordWrap(true);
-	v->addWidget(tf.status);
+	tab.enabled = new QCheckBox(tr("Show %1 chat").arg(name), page);
+	tab.enabled->setChecked(c->Enabled());
+	v->addWidget(tab.enabled);
+
+	if (!main.isEmpty()) {
+		QFormLayout *form = new QFormLayout();
+		for (const Field &f : main) {
+			form->addRow(f.label, makeEdit(f));
+		}
+		v->addLayout(form);
+	}
+
+	if (p == ChatPlatform::Rumble) {
+		QLabel *how =
+			new QLabel(tr("<a href=\"https://rumble.com/account/livestream-api\">Get your Live Stream "
+				      "API URL from Rumble</a>, then paste it above. Rumble only lets apps "
+				      "read chat, so sending and moderation aren't available."),
+				   page);
+		how->setOpenExternalLinks(true);
+		how->setWordWrap(true);
+		how->setStyleSheet("color:#9aa3b2");
+		v->addWidget(how);
+	}
+
+	tab.status = new QLabel(page);
+	tab.status->setWordWrap(true);
+	v->addWidget(tab.status);
 	v->addStretch();
+
+	if (!advanced.isEmpty()) {
+		QToolButton *toggle = new QToolButton(page);
+		toggle->setText(tr("Advanced"));
+		toggle->setCheckable(true);
+		toggle->setAutoRaise(true);
+		toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+		toggle->setArrowType(Qt::RightArrow);
+		QWidget *box = new QWidget(page);
+		QVBoxLayout *bl = new QVBoxLayout(box);
+		bl->setContentsMargins(16, 0, 0, 0);
+		QFormLayout *form = new QFormLayout();
+		for (const Field &f : advanced) {
+			form->addRow(f.label, makeEdit(f));
+		}
+		bl->addLayout(form);
+		QLabel *help = new QLabel(advancedHelp, box);
+		help->setWordWrap(true);
+		help->setStyleSheet("color:#9aa3b2");
+		bl->addWidget(help);
+		/* Open Advanced only when this build can't connect on its own */
+		bool open = hasLogin && !c->LoginRequirement().isEmpty() && !c->LoggedIn();
+		box->setVisible(open);
+		toggle->setChecked(open);
+		toggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+		connect(toggle, &QToolButton::toggled, box, [box, toggle](bool on) {
+			box->setVisible(on);
+			toggle->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
+		});
+		v->addWidget(toggle);
+		v->addWidget(box);
+	}
 
 	RefreshStatus(p);
 	return page;
@@ -504,13 +552,19 @@ QWidget *ChatAccountsDialog::BuildTab(ChatPlatform p, const QList<QPair<QString,
 void ChatAccountsDialog::Apply(ChatPlatform p)
 {
 	ChatConnector *c = hub->Connector(p);
-	Fields &tf = tabs[int(p)];
+	Tab &tab = tabs[int(p)];
 	QJsonObject &cfg = c->Config();
 	QJsonObject before = cfg;
 
-	cfg["enabled"] = tf.enabled->isChecked();
-	for (auto &[key, edit] : tf.edits) {
+	cfg["enabled"] = tab.enabled->isChecked();
+	for (auto &[key, edit] : tab.edits) {
 		cfg[key] = edit->text().trimmed();
+	}
+
+	/* No channel typed: use the connected account's own channel */
+	if (cfg.value("channel").toString().isEmpty() && !cfg.value("user_login").toString().isEmpty() &&
+	    tab.edits.count("channel")) {
+		cfg["channel"] = cfg.value("user_login");
 	}
 
 	/* A different channel invalidates cached lookups */
@@ -526,22 +580,45 @@ void ChatAccountsDialog::Apply(ChatPlatform p)
 	}
 }
 
+void ChatAccountsDialog::SyncFromConfig(ChatPlatform p)
+{
+	/* A login just finished: show what it set (channel, chat switched on) */
+	auto it = tabs.find(int(p));
+	if (it == tabs.end()) {
+		return;
+	}
+	Tab &tab = it->second;
+	ChatConnector *c = hub->Connector(p);
+	if (c->Enabled() && !tab.enabled->isChecked()) {
+		tab.enabled->setChecked(true);
+	}
+	auto ch = tab.edits.find("channel");
+	if (ch != tab.edits.end() && ch->second->text().trimmed().isEmpty()) {
+		ch->second->setText(c->Config().value("channel").toString());
+	}
+	RefreshStatus(p);
+}
+
 void ChatAccountsDialog::RefreshStatus(ChatPlatform p)
 {
 	auto it = tabs.find(int(p));
 	if (it == tabs.end()) {
 		return;
 	}
-	Fields &tf = it->second;
+	Tab &tab = it->second;
 	ChatConnector *c = hub->Connector(p);
-	if (tf.login) {
+	if (tab.account) {
 		QString who = c->Config().value("user_name").toString();
-		tf.login->setText(c->LoggedIn() ? tr("Log in again") : tr("Log in to %1").arg(ChatPlatformName(p)));
-		tf.logout->setEnabled(c->LoggedIn());
-		tf.logout->setText(c->LoggedIn() && !who.isEmpty() ? tr("Log out %1").arg(who) : tr("Log out"));
+		if (c->LoggedIn()) {
+			tab.account->setText(who.isEmpty() ? tr("Connected") : tr("Connected as %1").arg(who));
+			tab.connect->setText(tr("Disconnect"));
+		} else {
+			tab.account->setText(tr("Not connected"));
+			tab.connect->setText(tr("Connect %1").arg(ChatPlatformName(p)));
+		}
 	}
-	if (tf.status && tf.status->text().isEmpty() && !c->StateText().isEmpty()) {
-		tf.status->setText(c->StateText());
+	if (tab.status && tab.status->text().isEmpty() && !c->StateText().isEmpty()) {
+		tab.status->setText(c->StateText());
 	}
 }
 
@@ -623,7 +700,7 @@ void MultichatDock::RefreshPlatforms()
 
 	input->setEnabled(!targets.isEmpty());
 	sendButton->setEnabled(!targets.isEmpty());
-	input->setPlaceholderText(targets.isEmpty() ? tr("Turn on a chat in Chat Sending to send messages")
+	input->setPlaceholderText(targets.isEmpty() ? tr("Connect a platform (⚙) and switch it on in Text to send")
 						    : tr("Send to %1").arg(targets.join(QStringLiteral(" + "))));
 }
 

@@ -9,6 +9,8 @@
 
 #include "ChatConnector.hpp"
 
+#include "multichat-config.h"
+
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QJsonDocument>
@@ -95,6 +97,52 @@ void ChatConnector::Logout()
 	}
 	emit ConfigChanged();
 	Restart();
+}
+
+static QString BuiltinClientId(ChatPlatform p)
+{
+	switch (p) {
+	case ChatPlatform::Twitch:
+		return QStringLiteral(MULTICHAT_TWITCH_CLIENT_ID);
+	case ChatPlatform::Kick:
+		return QStringLiteral(MULTICHAT_KICK_CLIENT_ID);
+	case ChatPlatform::YouTube:
+		return QStringLiteral(MULTICHAT_YOUTUBE_CLIENT_ID);
+	default:
+		return {};
+	}
+}
+
+static QString BuiltinClientSecret(ChatPlatform p)
+{
+	switch (p) {
+	case ChatPlatform::Kick:
+		return QStringLiteral(MULTICHAT_KICK_CLIENT_SECRET);
+	case ChatPlatform::YouTube:
+		return QStringLiteral(MULTICHAT_YOUTUBE_CLIENT_SECRET);
+	default:
+		return {};
+	}
+}
+
+QString ChatConnector::ClientId() const
+{
+	QString own = Str("client_id").trimmed();
+	return own.isEmpty() ? BuiltinClientId(platform) : own;
+}
+
+QString ChatConnector::ClientSecret() const
+{
+	/* A custom app needs its own secret; never mix it with the built-in one */
+	if (!Str("client_id").trimmed().isEmpty()) {
+		return Str("client_secret").trimmed();
+	}
+	return BuiltinClientSecret(platform);
+}
+
+bool ChatConnector::HasBuiltinApp() const
+{
+	return !BuiltinClientId(platform).isEmpty();
 }
 
 void ChatConnector::SetState(ChatState s, const QString &text)

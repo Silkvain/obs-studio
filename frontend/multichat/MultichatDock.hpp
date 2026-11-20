@@ -76,21 +76,28 @@ public:
 	ChatAccountsDialog(ChatHub *hub, QWidget *parent);
 
 private:
-	struct Fields {
+	struct Field {
+		QString key;
+		QString label;
+		QString placeholder;
+		bool secret = false;
+	};
+	struct Tab {
 		QCheckBox *enabled = nullptr;
 		std::map<QString, QLineEdit *> edits; /* config key -> field */
+		QLabel *account = nullptr;
 		QLabel *status = nullptr;
-		QPushButton *login = nullptr;
-		QPushButton *logout = nullptr;
+		QPushButton *connect = nullptr;
 	};
 
-	QWidget *BuildTab(ChatPlatform p, const QList<QPair<QString, QString>> &fields, const QString &help,
-			  bool hasLogin, const QStringList &secretKeys);
+	QWidget *BuildTab(ChatPlatform p, const QList<Field> &main, const QList<Field> &advanced,
+			  const QString &advancedHelp, bool hasLogin);
 	void Apply(ChatPlatform p);
 	void RefreshStatus(ChatPlatform p);
+	void SyncFromConfig(ChatPlatform p);
 
 	ChatHub *hub;
-	std::map<int, Fields> tabs;
+	std::map<int, Tab> tabs;
 };
 
 class MultichatDock : public QWidget {

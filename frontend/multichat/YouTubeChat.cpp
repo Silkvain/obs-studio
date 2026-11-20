@@ -50,8 +50,8 @@ YouTubeChat::YouTubeChat(QObject *parent) : ChatConnector(ChatPlatform::YouTube,
 
 QString YouTubeChat::LoginRequirement() const
 {
-	if (Str("client_id").trimmed().isEmpty() || Str("client_secret").trimmed().isEmpty()) {
-		return tr("Add your Google OAuth Client ID and Client Secret first.");
+	if (ClientId().isEmpty() || ClientSecret().isEmpty()) {
+		return tr("YouTube login isn't built into this build yet. Add a Google OAuth client under Advanced.");
 	}
 	return {};
 }
@@ -318,7 +318,7 @@ void YouTubeChat::Login(QWidget *)
 	QUrl url("https://accounts.google.com/o/oauth2/v2/auth");
 	QUrlQuery q;
 	q.addQueryItem("response_type", "code");
-	q.addQueryItem("client_id", Str("client_id").trimmed());
+	q.addQueryItem("client_id", ClientId());
 	q.addQueryItem("redirect_uri", oauth->RedirectUri());
 	q.addQueryItem("scope", kScope);
 	q.addQueryItem("state", oauth->State());
@@ -334,8 +334,8 @@ void YouTubeChat::Login(QWidget *)
 	});
 	connect(oauth, &LoopbackOAuth::CodeReceived, this, [this, oauth](const QString &code) {
 		QByteArray body = Form({{"grant_type", "authorization_code"},
-					{"client_id", Str("client_id").trimmed()},
-					{"client_secret", Str("client_secret").trimmed()},
+					{"client_id", ClientId()},
+					{"client_secret", ClientSecret()},
 					{"redirect_uri", oauth->RedirectUri()},
 					{"code_verifier", oauth->CodeVerifier()},
 					{"code", code}});
@@ -352,6 +352,7 @@ void YouTubeChat::Login(QWidget *)
 				config["refresh_token"] = obj.value("refresh_token").toString();
 				config["expires_at"] =
 					QDateTime::currentSecsSinceEpoch() + obj.value("expires_in").toInt();
+				config["enabled"] = true;
 				emit ConfigChanged();
 				EmitNotice(tr("Logged in to YouTube"));
 				Start();
@@ -368,8 +369,8 @@ void YouTubeChat::RefreshToken(std::function<void(bool)> done)
 		return;
 	}
 	QByteArray body = Form({{"grant_type", "refresh_token"},
-				{"client_id", Str("client_id").trimmed()},
-				{"client_secret", Str("client_secret").trimmed()},
+				{"client_id", ClientId()},
+				{"client_secret", ClientSecret()},
 				{"refresh_token", refresh}});
 	Request("POST", QUrl("https://oauth2.googleapis.com/token"), {}, body, "application/x-www-form-urlencoded",
 		[this, done](int status, const QJsonObject &obj, const QByteArray &) {
