@@ -28,6 +28,11 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Fetch version tags 🏷️
+        # Forks don't copy upstream tags, but OBS derives its version from
+        # `git describe`, so pull the release tags from the official repo.
+        run: git fetch --force https://github.com/obsproject/obs-studio.git "refs/tags/*:refs/tags/*"
+
       - name: Build OBS Studio 🧱
         uses: ./.github/actions/build-obs
         with:
