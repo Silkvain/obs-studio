@@ -124,6 +124,11 @@ void MultistreamManager::LoadForProfile(const std::filesystem::path &profileDir)
 			d.server = o.value("server").toString();
 			d.key = o.value("key").toString();
 			d.enabled = o.value("enabled").toBool(true);
+			d.customQuality = o.value("custom_quality").toBool(false);
+			d.videoBitrate = o.value("video_bitrate").toInt(6000);
+			d.audioBitrate = o.value("audio_bitrate").toInt(160);
+			d.width = o.value("width").toInt(0);
+			d.height = o.value("height").toInt(0);
 			destinations.push_back(std::move(d));
 		}
 	}
@@ -145,6 +150,11 @@ void MultistreamManager::Save() const
 		o["server"] = d.server;
 		o["key"] = d.key;
 		o["enabled"] = d.enabled;
+		o["custom_quality"] = d.customQuality;
+		o["video_bitrate"] = d.videoBitrate;
+		o["audio_bitrate"] = d.audioBitrate;
+		o["width"] = d.width;
+		o["height"] = d.height;
 		arr.append(o);
 	}
 	QJsonObject root;
@@ -192,7 +202,7 @@ void MultistreamManager::UpdateDestination(const MultistreamDestination &dest)
 	}
 
 	bool wasRunning = FindRuntime(dest.id) != nullptr;
-	bool connectionChanged = d->server != dest.server || d->key != dest.key;
+	bool connectionChanged = d->server != dest.server || d->key != dest.key || !d->SameQuality(dest);
 	*d = dest;
 	Save();
 	emit DestinationsChanged();
@@ -372,13 +382,23 @@ void MultistreamManager::StartDestination(const MultistreamDestination &dest)
 		return;
 	}
 
-	/* Borrow the primary stream's encoders: encode once, upload N times */
+	/* By default borrow the primary stream's encoders: encode once, upload N
+	 * times. Custom-quality destinations get their own encoders instead. */
 	OBSOutputAutoRelease primary = obs_frontend_get_streaming_output();
 	obs_encoder_t *venc = primary ? obs_output_get_video_encoder(primary) : nullptr;
 	obs_encoder_t *aenc = primary ? obs_output_get_audio_encoder(primary, 0) : nullptr;
 	if (!venc || !aenc) {
 		fail(QTStr("Multistream.Error.NoEncoders"));
 		return;
+	}
+	if (dest.customQuality) {
+		QString error;
+		if (!CreateCustomEncoders(*raw, dest, venc, aenc, error)) {
+			fail(error);
+			return;
+		}
+		venc = raw->videoEncoder;
+		aenc = raw->audioEncoder;
 	}
 
 	OBSDataAutoRelease serviceSettings = obs_data_create();
@@ -417,6 +437,65 @@ void MultistreamManager::StartDestination(const MultistreamDestination &dest)
 	if (!bitrateTimer.isActive()) {
 		bitrateTimer.start();
 	}
+}
+
+bool MultistreamManager::CreateCustomEncoders(Runtime &rt, const MultistreamDestination &dest, obs_encoder_t *mainVideo,
+					      obs_encoder_t *mainAudio, QString &error)
+{
+	std::string base = "multistream_" + dest.id.toStdString();
+
+	/* Same encoder type and settings as the main stream (NVENC, x264, ...),
+	 * with this destination's bitrate. Force CBR so the bitrate applies. */
+	OBSDataAutoRelease mainVideoSettings = obs_encoder_get_settings(mainVideo);
+	OBSDataAutoRelease videoSettings = obs_data_create_from_json(obs_data_get_json(mainVideoSettings));
+	obs_data_set_int(videoSettings, "bitrate", std::max(500, dest.videoBitrate));
+	obs_data_set_string(videoSettings, "rate_control", "CBR");
+
+	rt.videoEncoder = obs_video_encoder_create(obs_encoder_get_id(mainVideo), (base + "_video").c_str(),
+						   videoSettings, nullptr);
+	if (!rt.videoEncoder) {
+		error = QTStr("Multistream.Error.Encode");
+		return false;
+	}
+
+	video_t *video = obs_encoder_parent_video(mainVideo);
+	obs_encoder_set_video(rt.videoEncoder, video ? video : obs_get_video());
+	obs_encoder_set_gpu_scale_type(rt.videoEncoder, obs_encoder_get_scale_type(mainVideo));
+	obs_encoder_set_frame_rate_divisor(rt.videoEncoder, obs_encoder_get_frame_rate_divisor(mainVideo));
+
+	uint32_t baseW = obs_encoder_get_width(mainVideo);
+	uint32_t baseH = obs_encoder_get_height(mainVideo);
+	obs_video_info ovi = {};
+	obs_get_video_info(&ovi);
+	bool fitsCanvas = dest.width > 0 && dest.height > 0 && uint32_t(dest.width) <= ovi.base_width &&
+			  uint32_t(dest.height) <= ovi.base_height;
+	if (dest.width > 0 && !fitsCanvas) {
+		blog(LOG_WARNING, "[multistream] '%s': %dx%d is larger than the canvas; using the main stream size",
+		     dest.name.toUtf8().constData(), dest.width, dest.height);
+	}
+	if (fitsCanvas) {
+		obs_encoder_set_scaled_size(rt.videoEncoder, uint32_t(dest.width), uint32_t(dest.height));
+	} else if (baseW && baseH) {
+		/* Match the main stream's output size */
+		obs_encoder_set_scaled_size(rt.videoEncoder, baseW, baseH);
+	}
+
+	OBSDataAutoRelease mainAudioSettings = obs_encoder_get_settings(mainAudio);
+	OBSDataAutoRelease audioSettings = obs_data_create_from_json(obs_data_get_json(mainAudioSettings));
+	obs_data_set_int(audioSettings, "bitrate", dest.audioBitrate > 0 ? dest.audioBitrate : 160);
+	rt.audioEncoder = obs_audio_encoder_create(obs_encoder_get_id(mainAudio), (base + "_audio").c_str(),
+						   audioSettings, obs_encoder_get_mixer_index(mainAudio), nullptr);
+	if (!rt.audioEncoder) {
+		error = QTStr("Multistream.Error.Encode");
+		return false;
+	}
+	obs_encoder_set_audio(rt.audioEncoder, obs_get_audio());
+
+	blog(LOG_INFO, "[multistream] '%s' uses custom quality: %d kbps video, %d kbps audio, %s",
+	     dest.name.toUtf8().constData(), dest.videoBitrate, dest.audioBitrate,
+	     dest.width > 0 ? QStringLiteral("%1x%2").arg(dest.width).arg(dest.height).toUtf8().constData()
+			    : "main stream size");
+	return true;
 }
 
 void MultistreamManager::StopRuntime(Runtime &rt, bool force)

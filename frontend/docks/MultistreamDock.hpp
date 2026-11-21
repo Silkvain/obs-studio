@@ -44,6 +44,15 @@ private:
 	QLineEdit *key;
 	QLabel *hint;
 	QPushButton *okButton;
+
+	/* Quality */
+	QComboBox *quality;
+	QWidget *customBox;
+	class QSpinBox *videoBitrate;
+	QComboBox *resolution;
+	QComboBox *audioBitrate;
+	QLabel *qualityHint;
+	void UpdateQualityHint();
 };
 
 class MultistreamRow : public QWidget {

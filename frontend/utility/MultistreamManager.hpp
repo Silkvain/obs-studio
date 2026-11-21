@@ -32,6 +32,20 @@ struct MultistreamDestination {
 	QString key;
 	bool enabled = true;
 
+	/* Quality. false = share the main stream's encoders (no extra work).
+	 * true = encode this destination separately with these settings. */
+	bool customQuality = false;
+	int videoBitrate = 6000; /* kbps */
+	int audioBitrate = 160;  /* kbps */
+	int width = 0;           /* 0 = same output size as the main stream */
+	int height = 0;
+
+	bool SameQuality(const MultistreamDestination &o) const
+	{
+		return customQuality == o.customQuality && videoBitrate == o.videoBitrate &&
+		       audioBitrate == o.audioBitrate && width == o.width && height == o.height;
+	}
+
 	static MultistreamDestination Create()
 	{
 		MultistreamDestination d;
@@ -97,6 +111,9 @@ private slots:
 private:
 	struct Runtime {
 		QString id;
+		/* Declared before the output so the output is destroyed first */
+		OBSEncoderAutoRelease videoEncoder; /* custom quality only */
+		OBSEncoderAutoRelease audioEncoder;
 		OBSOutputAutoRelease output;
 		OBSServiceAutoRelease service;
 		OBSSignal startSig;
@@ -114,6 +131,8 @@ private:
 	Runtime *FindRuntime(const QString &id);
 	const Runtime *FindRuntime(const QString &id) const;
 	void StartDestination(const MultistreamDestination &dest);
+	bool CreateCustomEncoders(Runtime &rt, const MultistreamDestination &dest, obs_encoder_t *mainVideo,
+				  obs_encoder_t *mainAudio, QString &error);
 	void StopRuntime(Runtime &rt, bool force);
 	void SetStatus(const QString &id, MultistreamState state, const QString &message = {});
 	void ReleaseRuntime(const QString &id);

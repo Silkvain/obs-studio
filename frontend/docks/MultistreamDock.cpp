@@ -26,6 +26,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSpinBox>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -172,9 +173,60 @@ MultistreamDestinationDialog::MultistreamDestinationDialog(QWidget *parent, cons
 	connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
+	/* Quality: share the main stream's encoding, or encode separately */
+	quality = new QComboBox(this);
+	quality->addItem(QTStr("Multistream.Quality.Same"));
+	quality->addItem(QTStr("Multistream.Quality.Custom"));
+
+	videoBitrate = new QSpinBox(this);
+	videoBitrate->setRange(500, 60000);
+	videoBitrate->setSingleStep(500);
+	videoBitrate->setSuffix(QStringLiteral(" kbps"));
+	videoBitrate->setValue(dest.videoBitrate);
+
+	resolution = new QComboBox(this);
+	resolution->addItem(QTStr("Multistream.Quality.SameSize"), QSize());
+	for (QSize sz : {QSize(3840, 2160), QSize(2560, 1440), QSize(1920, 1080), QSize(1600, 900), QSize(1280, 720),
+			 QSize(852, 480)}) {
+		resolution->addItem(QStringLiteral("%1×%2").arg(sz.width()).arg(sz.height()), sz);
+	}
+	resolution->setCurrentIndex(std::max(0, resolution->findData(QSize(dest.width, dest.height))));
+
+	audioBitrate = new QComboBox(this);
+	for (int kb : {96, 128, 160, 192, 256, 320}) {
+		audioBitrate->addItem(QStringLiteral("%1 kbps").arg(kb), kb);
+	}
+	audioBitrate->setCurrentIndex(std::max(0, audioBitrate->findData(dest.audioBitrate)));
+
+	customBox = new QWidget(this);
+	QFormLayout *customForm = new QFormLayout(customBox);
+	customForm->setContentsMargins(0, 0, 0, 0);
+	customForm->addRow(QTStr("Multistream.Quality.VideoBitrate"), videoBitrate);
+	customForm->addRow(QTStr("Multistream.Quality.Resolution"), resolution);
+	customForm->addRow(QTStr("Multistream.Quality.AudioBitrate"), audioBitrate);
+
+	qualityHint = new QLabel(this);
+	qualityHint->setWordWrap(true);
+	qualityHint->setStyleSheet("color: palette(placeholder-text);");
+
+	QFormLayout *qualityForm = new QFormLayout();
+	qualityForm->addRow(QTStr("Multistream.Quality"), quality);
+
+	quality->setCurrentIndex(dest.customQuality ? 1 : 0);
+	customBox->setVisible(dest.customQuality);
+	connect(quality, &QComboBox::currentIndexChanged, this, [this](int i) {
+		customBox->setVisible(i == 1);
+		UpdateQualityHint();
+		adjustSize();
+	});
+
 	QVBoxLayout *layout = new QVBoxLayout(this);
 	layout->addLayout(form);
 	layout->addWidget(hint);
+	layout->addSpacing(8);
+	layout->addLayout(qualityForm);
+	layout->addWidget(customBox);
+	layout->addWidget(qualityHint);
 	layout->addStretch();
 	layout->addWidget(buttons);
 
@@ -188,6 +240,8 @@ MultistreamDestinationDialog::MultistreamDestinationDialog(QWidget *parent, cons
 	}
 
 	connect(preset, &QComboBox::currentIndexChanged, this, &MultistreamDestinationDialog::PresetChanged);
+	connect(preset, &QComboBox::currentIndexChanged, this, &MultistreamDestinationDialog::UpdateQualityHint);
+	UpdateQualityHint();
 	connect(name, &QLineEdit::textChanged, this, &MultistreamDestinationDialog::Validate);
 	connect(server, &QLineEdit::textChanged, this, &MultistreamDestinationDialog::Validate);
 	connect(key, &QLineEdit::textChanged, this, &MultistreamDestinationDialog::Validate);
@@ -244,7 +298,29 @@ MultistreamDestination MultistreamDestinationDialog::Result() const
 	d.name = name->text().trimmed();
 	d.server = server->text().trimmed();
 	d.key = key->text().trimmed();
+	d.customQuality = quality->currentIndex() == 1;
+	d.videoBitrate = videoBitrate->value();
+	d.audioBitrate = audioBitrate->currentData().toInt();
+	QSize sz = resolution->currentData().toSize();
+	d.width = sz.isValid() ? sz.width() : 0;
+	d.height = sz.isValid() ? sz.height() : 0;
 	return d;
+}
+
+void MultistreamDestinationDialog::UpdateQualityHint()
+{
+	if (quality->currentIndex() == 0) {
+		qualityHint->setText(QTStr("Multistream.Quality.SameHint"));
+		return;
+	}
+	QString text = QTStr("Multistream.Quality.CustomHint");
+	QString platform = preset->currentText();
+	if (platform == "YouTube") {
+		text += QStringLiteral(" ") + QTStr("Multistream.Quality.YouTubeHint");
+	} else if (platform == "Twitch") {
+		text += QStringLiteral(" ") + QTStr("Multistream.Quality.TwitchHint");
+	}
+	qualityHint->setText(text);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -450,7 +526,8 @@ void MultistreamDock::Rebuild()
 	int insertAt = 1;
 	for (const auto &d : manager->Destinations()) {
 		MultistreamRow *row = new MultistreamRow(this, d.id, false);
-		row->SetName(d.name);
+		row->SetName(d.customQuality ? QStringLiteral("%1  ·  %2 kbps").arg(d.name).arg(d.videoBitrate)
+					     : d.name);
 		row->SetEnabled(d.enabled);
 		row->SetPrimaryLive(primaryLive);
 		MultistreamStatus st = manager->Status(d.id);
