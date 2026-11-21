@@ -45,7 +45,8 @@ private:
 	QLabel *hint;
 	QPushButton *okButton;
 
-	/* Quality */
+	/* Picture and quality */
+	QComboBox *canvas;
 	QComboBox *quality;
 	QWidget *customBox;
 	class QSpinBox *videoBitrate;
@@ -53,6 +54,7 @@ private:
 	QComboBox *audioBitrate;
 	QLabel *qualityHint;
 	void UpdateQualityHint();
+	void FillResolutions(bool vertical, QSize keep);
 };
 
 class MultistreamRow : public QWidget {

@@ -45,6 +45,7 @@ struct Preset {
 	const char *name;
 	const char *server;     /* empty: account/region specific, user pastes it */
 	const char *hintLookup; /* where to find the URL and key */
+	bool vertical = false;  /* phone platform: send the 9:16 canvas */
 };
 
 const Preset kPresets[] = {
@@ -53,6 +54,7 @@ const Preset kPresets[] = {
 	{"YouTube", "rtmp://a.rtmp.youtube.com/live2", "Multistream.Hint.YouTube"},
 	{"X", "", "Multistream.Hint.X"},
 	{"Facebook", "rtmps://live-api-s.facebook.com:443/rtmp/", "Multistream.Hint.Facebook"},
+	{"TikTok", "", "Multistream.Hint.TikTok", true},
 	{"Custom", "", "Multistream.Hint.Custom"},
 };
 constexpr int kCustomPreset = int(std::size(kPresets)) - 1;
@@ -184,13 +186,17 @@ MultistreamDestinationDialog::MultistreamDestinationDialog(QWidget *parent, cons
 	videoBitrate->setSuffix(QStringLiteral(" kbps"));
 	videoBitrate->setValue(dest.videoBitrate);
 
+	canvas = new QComboBox(this);
+	canvas->addItem(QTStr("Multistream.Canvas.Main"));
+	canvas->addItem(QTStr("Multistream.Canvas.Vertical"));
+	canvas->setCurrentIndex(dest.vertical ? 1 : 0);
+
 	resolution = new QComboBox(this);
-	resolution->addItem(QTStr("Multistream.Quality.SameSize"), QSize());
-	for (QSize sz : {QSize(3840, 2160), QSize(2560, 1440), QSize(1920, 1080), QSize(1600, 900), QSize(1280, 720),
-			 QSize(852, 480)}) {
-		resolution->addItem(QStringLiteral("%1×%2").arg(sz.width()).arg(sz.height()), sz);
-	}
-	resolution->setCurrentIndex(std::max(0, resolution->findData(QSize(dest.width, dest.height))));
+	FillResolutions(dest.vertical, QSize(dest.width, dest.height));
+	connect(canvas, &QComboBox::currentIndexChanged, this, [this](int i) {
+		FillResolutions(i == 1, resolution->currentData().toSize());
+		UpdateQualityHint();
+	});
 
 	audioBitrate = new QComboBox(this);
 	for (int kb : {96, 128, 160, 192, 256, 320}) {
@@ -210,6 +216,7 @@ MultistreamDestinationDialog::MultistreamDestinationDialog(QWidget *parent, cons
 	qualityHint->setStyleSheet("color: palette(placeholder-text);");
 
 	QFormLayout *qualityForm = new QFormLayout();
+	qualityForm->addRow(QTStr("Multistream.Canvas"), canvas);
 	qualityForm->addRow(QTStr("Multistream.Quality"), quality);
 
 	quality->setCurrentIndex(dest.customQuality ? 1 : 0);
@@ -237,6 +244,7 @@ MultistreamDestinationDialog::MultistreamDestinationDialog(QWidget *parent, cons
 		/* Don't let the preset clobber saved values when editing */
 		name->setText(dest.name);
 		server->setText(dest.server);
+		canvas->setCurrentIndex(dest.vertical ? 1 : 0);
 	}
 
 	connect(preset, &QComboBox::currentIndexChanged, this, &MultistreamDestinationDialog::PresetChanged);
@@ -281,7 +289,24 @@ void MultistreamDestinationDialog::PresetChanged(int index)
 	}
 
 	hint->setText(QTStr(p.hintLookup));
+	if (index != kCustomPreset) {
+		canvas->setCurrentIndex(p.vertical ? 1 : 0);
+	}
 	Validate();
+}
+
+void MultistreamDestinationDialog::FillResolutions(bool vertical, QSize keep)
+{
+	resolution->clear();
+	resolution->addItem(QTStr("Multistream.Quality.SameSize"), QSize());
+	const std::initializer_list<QSize> landscape = {QSize(3840, 2160), QSize(2560, 1440), QSize(1920, 1080),
+							QSize(1600, 900),  QSize(1280, 720),  QSize(852, 480)};
+	const std::initializer_list<QSize> portrait = {QSize(2160, 3840), QSize(1440, 2560), QSize(1080, 1920),
+						       QSize(720, 1280)};
+	for (QSize sz : vertical ? portrait : landscape) {
+		resolution->addItem(QStringLiteral("%1×%2").arg(sz.width()).arg(sz.height()), sz);
+	}
+	resolution->setCurrentIndex(std::max(0, resolution->findData(keep)));
 }
 
 void MultistreamDestinationDialog::Validate()
@@ -298,6 +323,7 @@ MultistreamDestination MultistreamDestinationDialog::Result() const
 	d.name = name->text().trimmed();
 	d.server = server->text().trimmed();
 	d.key = key->text().trimmed();
+	d.vertical = canvas->currentIndex() == 1;
 	d.customQuality = quality->currentIndex() == 1;
 	d.videoBitrate = videoBitrate->value();
 	d.audioBitrate = audioBitrate->currentData().toInt();
@@ -310,7 +336,8 @@ MultistreamDestination MultistreamDestinationDialog::Result() const
 void MultistreamDestinationDialog::UpdateQualityHint()
 {
 	if (quality->currentIndex() == 0) {
-		qualityHint->setText(QTStr("Multistream.Quality.SameHint"));
+		qualityHint->setText(QTStr(canvas->currentIndex() == 1 ? "Multistream.Quality.SameHintVertical"
+								       : "Multistream.Quality.SameHint"));
 		return;
 	}
 	QString text = QTStr("Multistream.Quality.CustomHint");
@@ -526,8 +553,14 @@ void MultistreamDock::Rebuild()
 	int insertAt = 1;
 	for (const auto &d : manager->Destinations()) {
 		MultistreamRow *row = new MultistreamRow(this, d.id, false);
-		row->SetName(d.customQuality ? QStringLiteral("%1  ·  %2 kbps").arg(d.name).arg(d.videoBitrate)
-					     : d.name);
+		QString label = d.name;
+		if (d.vertical) {
+			label += QStringLiteral("  ·  9:16");
+		}
+		if (d.customQuality) {
+			label += QStringLiteral("  ·  %1 kbps").arg(d.videoBitrate);
+		}
+		row->SetName(label);
 		row->SetEnabled(d.enabled);
 		row->SetPrimaryLive(primaryLive);
 		MultistreamStatus st = manager->Status(d.id);

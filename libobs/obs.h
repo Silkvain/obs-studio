@@ -2721,6 +2721,16 @@ EXPORT bool obs_canvas_reset_video(obs_canvas_t *canvas, struct obs_video_info *
 /** Returns true if the canvas video is configured */
 EXPORT bool obs_canvas_has_video(obs_canvas_t *canvas);
 /** Get canvas video output */
+/** Siegfried: Store video info (size, format) without creating a video mix,
+ *  so the canvas has a size but costs nothing to render until it is used. */
+EXPORT bool obs_canvas_set_idle_video_info(obs_canvas_t *canvas, const struct obs_video_info *ovi);
+
+/** Siegfried: Free the canvas video mix (if not in use) but keep its video info. */
+EXPORT bool obs_canvas_stop_video(obs_canvas_t *canvas);
+
+/** Siegfried: Base size of the canvas, also when it has no video mix. */
+EXPORT bool obs_canvas_get_base_size(const obs_canvas_t *canvas, uint32_t *cx, uint32_t *cy);
+
 EXPORT video_t *obs_canvas_get_video(const obs_canvas_t *canvas);
 /** Get canvas video info (if it exists) */
 EXPORT bool obs_canvas_get_video_info(const obs_canvas_t *canvas, struct obs_video_info *ovi);

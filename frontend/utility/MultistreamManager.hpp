@@ -32,6 +32,10 @@ struct MultistreamDestination {
 	QString key;
 	bool enabled = true;
 
+	/* Which picture to send: the main 16:9 canvas, or the 9:16 vertical
+	 * canvas (phone platforms). Vertical always has its own encoder. */
+	bool vertical = false;
+
 	/* Quality. false = share the main stream's encoders (no extra work).
 	 * true = encode this destination separately with these settings. */
 	bool customQuality = false;
@@ -42,7 +46,7 @@ struct MultistreamDestination {
 
 	bool SameQuality(const MultistreamDestination &o) const
 	{
-		return customQuality == o.customQuality && videoBitrate == o.videoBitrate &&
+		return vertical == o.vertical && customQuality == o.customQuality && videoBitrate == o.videoBitrate &&
 		       audioBitrate == o.audioBitrate && width == o.width && height == o.height;
 	}
 
@@ -110,7 +114,10 @@ private slots:
 
 private:
 	struct Runtime {
+		~Runtime();
 		QString id;
+		/* Vertical canvas video held while this destination runs */
+		class VerticalCanvas *vertical = nullptr;
 		/* Declared before the output so the output is destroyed first */
 		OBSEncoderAutoRelease videoEncoder; /* custom quality only */
 		OBSEncoderAutoRelease audioEncoder;
@@ -133,6 +140,9 @@ private:
 	void StartDestination(const MultistreamDestination &dest);
 	bool CreateCustomEncoders(Runtime &rt, const MultistreamDestination &dest, obs_encoder_t *mainVideo,
 				  obs_encoder_t *mainAudio, QString &error);
+	bool CreateVerticalEncoders(Runtime &rt, const MultistreamDestination &dest, obs_encoder_t *mainVideo,
+				    obs_encoder_t *mainAudio, QString &error);
+	static void FreeRuntimeOutput(Runtime &rt);
 	void StopRuntime(Runtime &rt, bool force);
 	void SetStatus(const QString &id, MultistreamState state, const QString &message = {});
 	void ReleaseRuntime(const QString &id);

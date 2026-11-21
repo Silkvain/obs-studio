@@ -740,6 +740,9 @@ struct obs_canvas {
 	 * though this may change in the future. */
 	struct obs_view view;
 	struct obs_core_video_mix *mix;
+
+	/* Siegfried: video info is known but no mix should be rendered */
+	bool video_idle;
 };
 
 extern obs_canvas_t *obs_create_main_canvas(void);

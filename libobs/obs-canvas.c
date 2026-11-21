@@ -306,6 +306,7 @@ bool obs_canvas_reset_video_internal(obs_canvas_t *canvas, struct obs_video_info
 	obs_canvas_clear_mix(canvas);
 
 	canvas->ovi = *ovi;
+	canvas->video_idle = false;
 	canvas->mix = obs_create_video_mix(&canvas->ovi);
 	if (canvas->mix) {
 		canvas->mix->view = &canvas->view;
@@ -407,6 +408,39 @@ bool obs_canvas_reset_video(obs_canvas_t *canvas, struct obs_video_info *ovi)
 		return false;
 
 	return obs_canvas_reset_video_internal(canvas, ovi);
+}
+
+bool obs_canvas_set_idle_video_info(obs_canvas_t *canvas, const struct obs_video_info *ovi)
+{
+	if (!canvas || !ovi || canvas->flags & MAIN || obs_canvas_video_active(canvas))
+		return false;
+
+	obs_canvas_clear_mix(canvas);
+	canvas->ovi = *ovi;
+	canvas->video_idle = true;
+	canvas_dosignal(canvas, "canvas_video_reset", "video_reset");
+	return true;
+}
+
+bool obs_canvas_stop_video(obs_canvas_t *canvas)
+{
+	if (!canvas || canvas->flags & MAIN || obs_canvas_video_active(canvas))
+		return false;
+
+	obs_canvas_clear_mix(canvas);
+	canvas->video_idle = true;
+	return true;
+}
+
+bool obs_canvas_get_base_size(const obs_canvas_t *canvas, uint32_t *cx, uint32_t *cy)
+{
+	if (!canvas || !canvas->ovi.base_width || !canvas->ovi.base_height)
+		return false;
+	if (cx)
+		*cx = canvas->ovi.base_width;
+	if (cy)
+		*cy = canvas->ovi.base_height;
+	return true;
 }
 
 video_t *obs_canvas_get_video(const obs_canvas_t *canvas)

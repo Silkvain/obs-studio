@@ -10,6 +10,7 @@
 #include "MultistreamManager.hpp"
 
 #include <widgets/OBSBasic.hpp>
+#include <vertical/VerticalCanvas.hpp>
 
 #include <obs-frontend-api.h>
 #include <util/platform.h>
@@ -129,6 +130,7 @@ void MultistreamManager::LoadForProfile(const std::filesystem::path &profileDir)
 			d.audioBitrate = o.value("audio_bitrate").toInt(160);
 			d.width = o.value("width").toInt(0);
 			d.height = o.value("height").toInt(0);
+			d.vertical = o.value("canvas").toString() == QStringLiteral("vertical");
 			destinations.push_back(std::move(d));
 		}
 	}
@@ -155,6 +157,7 @@ void MultistreamManager::Save() const
 		o["audio_bitrate"] = d.audioBitrate;
 		o["width"] = d.width;
 		o["height"] = d.height;
+		o["canvas"] = d.vertical ? QStringLiteral("vertical") : QStringLiteral("main");
 		arr.append(o);
 	}
 	QJsonObject root;
@@ -375,6 +378,9 @@ void MultistreamManager::StartDestination(const MultistreamDestination &dest)
 	auto fail = [&](const QString &msg) {
 		blog(LOG_WARNING, "[multistream] '%s': %s", dest.name.toUtf8().constData(), msg.toUtf8().constData());
 		SetStatus(dest.id, MultistreamState::Failed, msg);
+		if (raw->vertical) {
+			FreeRuntimeOutput(*raw);
+		}
 	};
 
 	if (dest.server.trimmed().isEmpty()) {
@@ -391,7 +397,17 @@ void MultistreamManager::StartDestination(const MultistreamDestination &dest)
 		fail(QTStr("Multistream.Error.NoEncoders"));
 		return;
 	}
-	if (dest.customQuality) {
+	if (dest.vertical) {
+		QString error;
+		if (!CreateVerticalEncoders(*raw, dest, venc, aenc, error)) {
+			fail(error);
+			return;
+		}
+		venc = raw->videoEncoder;
+		if (raw->audioEncoder) {
+			aenc = raw->audioEncoder;
+		}
+	} else if (dest.customQuality) {
 		QString error;
 		if (!CreateCustomEncoders(*raw, dest, venc, aenc, error)) {
 			fail(error);
@@ -496,6 +512,92 @@ bool MultistreamManager::CreateCustomEncoders(Runtime &rt, const MultistreamDest
 	     dest.width > 0 ? QStringLiteral("%1x%2").arg(dest.width).arg(dest.height).toUtf8().constData()
 			    : "main stream size");
 	return true;
+}
+
+bool MultistreamManager::CreateVerticalEncoders(Runtime &rt, const MultistreamDestination &dest,
+						obs_encoder_t *mainVideo, obs_encoder_t *mainAudio, QString &error)
+{
+	OBSBasic *main = OBSBasic::Get();
+	VerticalCanvas *vc = main ? main->GetVerticalCanvas() : nullptr;
+	video_t *video = vc ? vc->AcquireVideo() : nullptr;
+	if (!video) {
+		error = QTStr("Multistream.Error.NoVertical");
+		return false;
+	}
+	rt.vertical = vc;
+
+	std::string base = "multistream_" + dest.id.toStdString();
+
+	/* Same encoder and settings as the main stream, fed from the vertical
+	 * canvas. Custom quality only changes bitrate and size. */
+	OBSDataAutoRelease mainVideoSettings = obs_encoder_get_settings(mainVideo);
+	OBSDataAutoRelease videoSettings = obs_data_create_from_json(obs_data_get_json(mainVideoSettings));
+	if (dest.customQuality) {
+		obs_data_set_int(videoSettings, "bitrate", std::max(500, dest.videoBitrate));
+		obs_data_set_string(videoSettings, "rate_control", "CBR");
+	}
+	rt.videoEncoder = obs_video_encoder_create(obs_encoder_get_id(mainVideo), (base + "_video").c_str(),
+						   videoSettings, nullptr);
+	if (!rt.videoEncoder) {
+		error = QTStr("Multistream.Error.Encode");
+		return false;
+	}
+	obs_encoder_set_video(rt.videoEncoder, video);
+	obs_encoder_set_gpu_scale_type(rt.videoEncoder, obs_encoder_get_scale_type(mainVideo));
+	obs_encoder_set_frame_rate_divisor(rt.videoEncoder, obs_encoder_get_frame_rate_divisor(mainVideo));
+
+	uint32_t cw = 0, ch = 0;
+	vc->GetSize(cw, ch);
+	if (dest.customQuality && dest.width > 0 && dest.height > 0) {
+		if (uint32_t(dest.width) <= cw && uint32_t(dest.height) <= ch) {
+			obs_encoder_set_scaled_size(rt.videoEncoder, uint32_t(dest.width), uint32_t(dest.height));
+		} else {
+			blog(LOG_WARNING, "[multistream] '%s': %dx%d is larger than the vertical canvas (%ux%u)",
+			     dest.name.toUtf8().constData(), dest.width, dest.height, cw, ch);
+		}
+	}
+
+	if (dest.customQuality) {
+		OBSDataAutoRelease mainAudioSettings = obs_encoder_get_settings(mainAudio);
+		OBSDataAutoRelease audioSettings = obs_data_create_from_json(obs_data_get_json(mainAudioSettings));
+		obs_data_set_int(audioSettings, "bitrate", dest.audioBitrate > 0 ? dest.audioBitrate : 160);
+		rt.audioEncoder = obs_audio_encoder_create(obs_encoder_get_id(mainAudio), (base + "_audio").c_str(),
+							   audioSettings, obs_encoder_get_mixer_index(mainAudio), nullptr);
+		if (!rt.audioEncoder) {
+			error = QTStr("Multistream.Error.Encode");
+			return false;
+		}
+		obs_encoder_set_audio(rt.audioEncoder, obs_get_audio());
+	}
+
+	blog(LOG_INFO, "[multistream] '%s' streams the vertical canvas (%ux%u)", dest.name.toUtf8().constData(), cw,
+	     ch);
+	return true;
+}
+
+MultistreamManager::Runtime::~Runtime()
+{
+	FreeRuntimeOutput(*this);
+}
+
+void MultistreamManager::FreeRuntimeOutput(Runtime &rt)
+{
+	/* Output first, then its encoders, then the canvas video they read */
+	rt.startSig.Disconnect();
+	rt.stopSig.Disconnect();
+	rt.reconnectSig.Disconnect();
+	rt.reconnectOkSig.Disconnect();
+	if (rt.output && obs_output_active(rt.output)) {
+		obs_output_force_stop(rt.output);
+	}
+	rt.output = nullptr;
+	rt.service = nullptr;
+	rt.videoEncoder = nullptr;
+	rt.audioEncoder = nullptr;
+	if (rt.vertical) {
+		rt.vertical->ReleaseVideo();
+		rt.vertical = nullptr;
+	}
 }
 
 void MultistreamManager::StopRuntime(Runtime &rt, bool force)
@@ -611,6 +713,11 @@ void MultistreamManager::OutputStop(void *data, calldata_t *cd)
 				self->SetStatus(id, MultistreamState::Failed, message);
 			}
 			blog(LOG_INFO, "[multistream] Destination %s stopped (code %d)", id.toUtf8().constData(), code);
+			/* Vertical: free the encoder now so the vertical canvas stops
+			 * rendering for encoding as soon as nothing streams it */
+			if (rt->vertical) {
+				FreeRuntimeOutput(*rt);
+			}
 		},
 		Qt::QueuedConnection);
 }

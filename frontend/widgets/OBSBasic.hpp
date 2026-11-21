@@ -62,6 +62,7 @@ class ScreenshotObj;
 class VolumeControl;
 class MultistreamManager;
 class ChatHub;
+class VerticalCanvas;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
 #endif
@@ -453,6 +454,8 @@ private:
 	MultistreamManager *multistream = nullptr;
 	QPointer<QDockWidget> multichatDock;
 	ChatHub *chatHub = nullptr;
+	VerticalCanvas *vertical = nullptr;
+	QPointer<QDockWidget> verticalDock;
 	QByteArray startingDockLayout;
 	QStringList extraDockNames;
 	QList<std::shared_ptr<QDockWidget>> extraDocks;
@@ -1164,6 +1167,7 @@ private:
 	void ClearCanvases();
 
 public:
+	VerticalCanvas *GetVerticalCanvas() const noexcept { return vertical; }
 	const std::vector<OBS::Canvas> &GetCanvases() const noexcept { return canvases; }
 
 	const OBS::Canvas &AddCanvas(const std::string &name, obs_video_info *ovi = nullptr, int flags = 0);

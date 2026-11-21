@@ -25,6 +25,8 @@
 #include "OBSBasicStats.hpp"
 #include "docks/MultistreamDock.hpp"
 #include "multichat/MultichatDock.hpp"
+#include "vertical/VerticalCanvas.hpp"
+#include "vertical/VerticalDock.hpp"
 #include "plugin-manager/PluginManager.hpp"
 
 #include <obs-module.h>
@@ -272,6 +274,16 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	addDockWidget(Qt::RightDockWidgetArea, multichatDock);
 	resizeDocks({multichatDock}, {std::min(width() * 25 / 100, 380)}, Qt::Horizontal);
 
+	/* Vertical (9:16) canvas: its own preview, scenes and sources */
+	verticalDock = new OBSDock();
+	verticalDock->setObjectName(QStringLiteral("verticalDock"));
+	verticalDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
+				  QDockWidget::DockWidgetFloatable);
+	verticalDock->setWindowTitle(QTStr("Vertical.DockTitle"));
+	addDockWidget(Qt::RightDockWidgetArea, verticalDock);
+	splitDockWidget(verticalDock, multichatDock, Qt::Horizontal);
+	resizeDocks({verticalDock}, {std::min(width() * 18 / 100, 300)}, Qt::Horizontal);
+
 	startingDockLayout = saveState();
 
 	statsDock = new OBSDock();
@@ -446,6 +458,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(statsDock);
 	SETUP_DOCK(chatTargetsDock);
 	SETUP_DOCK(multichatDock);
+	SETUP_DOCK(verticalDock);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -1141,6 +1154,10 @@ void OBSBasic::OBSInit()
 	chatTargetsDock->setWidget(new ChatTargetsPanel(chatTargetsDock, chatHub));
 	chatHub->StartAll();
 
+	/* setup vertical canvas */
+	vertical = new VerticalCanvas(this);
+	verticalDock->setWidget(new VerticalDock(verticalDock, vertical));
+
 	/* ----------------------------- */
 	/* add custom browser docks      */
 #if defined(BROWSER_AVAILABLE) && defined(YOUTUBE_ENABLED)
@@ -1193,6 +1210,18 @@ void OBSBasic::OBSInit()
 	if (!config_get_bool(App()->GetUserConfig(), "Multichat", "TargetsIntroduced")) {
 		chatTargetsDock->setVisible(true);
 		config_set_bool(App()->GetUserConfig(), "Multichat", "TargetsIntroduced", true);
+	}
+	if (!config_get_bool(App()->GetUserConfig(), "Vertical", "DockIntroduced")) {
+		/* Saved layouts predate this dock: put it between the preview and chat */
+		verticalDock->setFloating(false);
+		addDockWidget(Qt::RightDockWidgetArea, verticalDock);
+		if (multichatDock && !multichatDock->isFloating() && multichatDock->isVisible()) {
+			splitDockWidget(multichatDock, verticalDock, Qt::Horizontal);
+			splitDockWidget(verticalDock, multichatDock, Qt::Horizontal);
+		}
+		resizeDocks({verticalDock}, {std::min(width() * 18 / 100, 300)}, Qt::Horizontal);
+		verticalDock->setVisible(true);
+		config_set_bool(App()->GetUserConfig(), "Vertical", "DockIntroduced", true);
 	}
 	if (!config_get_bool(App()->GetUserConfig(), "Multichat", "DockIntroduced")) {
 		multichatDock->setVisible(true);
@@ -1384,6 +1413,8 @@ void OBSBasic::applicationShutdown() noexcept
 		multistream->Shutdown();
 	if (chatHub)
 		chatHub->StopAll();
+	if (vertical)
+		vertical->Shutdown();
 	service = nullptr;
 	outputHandler.reset();
 
