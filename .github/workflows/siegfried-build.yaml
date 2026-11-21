@@ -1,10 +1,10 @@
 name: Siegfried Build
 run-name: Siegfried build ⚔️ (${{ github.ref_name }})
 
-# Builds Siegfried for Windows (installer + portable zip, using OBS's own
-# build scripts) and Linux (Arch/CachyOS package), then publishes both as
-# one GitHub Release. Runs on every push to the "multistream" branch, or on
-# demand from the Actions tab ("Run workflow").
+# Builds Siegfried for Linux (Arch/CachyOS package) on every push to the
+# "multistream" branch and publishes it as a GitHub Release.
+# Windows (installer + portable zip) is only built on request: Actions tab ▸
+# Siegfried Build ▸ Run workflow ▸ tick "Also build Windows".
 on:
   push:
     branches:
@@ -12,6 +12,11 @@ on:
     paths-ignore:
       - '**.md'
   workflow_dispatch:
+    inputs:
+      windows:
+        description: Also build Windows
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,6 +29,7 @@ concurrency:
 jobs:
   windows-x64:
     name: Windows x64 🪟
+    if: github.event_name == 'workflow_dispatch' && inputs.windows
     runs-on: windows-2025-vs2026
     outputs:
       version: ${{ steps.installer.outputs.version }}
@@ -182,7 +188,11 @@ jobs:
   release:
     name: Publish release 🚀
     needs: [windows-x64, linux-arch]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Windows is usually skipped; publish whenever Linux built and Windows
+    # either built or wasn't asked for
+    if: >-
+      always() && needs.linux-arch.result == 'success' &&
+      (needs.windows-x64.result == 'success' || needs.windows-x64.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -196,10 +206,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.windows-x64.outputs.version }}
+          WINDOWS: ${{ needs.windows-x64.result }}
         run: |
           ls -la dist
+          if [ -z "$VERSION" ]; then
+            # Linux-only build: take the version from the package name
+            VERSION=$(ls dist/siegfried-*.pkg.tar.zst | sed -E 's#.*/siegfried-(.*)-[0-9]+-x86_64\.pkg\.tar\.zst#\1#')
+          fi
+          if [ "$WINDOWS" = "success" ]; then
+            PLATFORMS="Windows + Linux"
+          else
+            PLATFORMS="Linux only (Windows not built this time)"
+          fi
           cat > notes.md <<NOTES
-          Siegfried is a fork of OBS Studio with native multistreaming and multichat.
+          Siegfried is a fork of OBS Studio with native multistreaming and multichat. **$PLATFORMS.**
 
           **Windows:** run \`Siegfried-Setup-$VERSION.exe\`. It installs alongside regular OBS (separate folder, same settings). Not code-signed yet, so SmartScreen may warn: *More info → Run anyway*.
           Portable: unzip \`Siegfried-Portable-$VERSION.zip\` and run \`bin\\64bit\\obs64.exe\`.
@@ -212,6 +232,6 @@ jobs:
           gh release create "siegfried-build-${{ github.run_number }}-${GITHUB_SHA::7}" dist/* \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
-            --title "Siegfried $VERSION (build ${{ github.run_number }})" \
+            --title "Siegfried $VERSION (build ${{ github.run_number }}, $PLATFORMS)" \
             --notes-file notes.md \
             --latest
