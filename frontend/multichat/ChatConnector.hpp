@@ -11,7 +11,9 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+#include <QList>
 #include <QObject>
+#include <QPair>
 #include <QString>
 #include <QUrl>
 
