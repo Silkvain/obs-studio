@@ -1,0 +1,53 @@
+# Siegfried - Arch Linux / CachyOS package
+#
+# Packages an already-built install tree (made by the CI workflow) rather
+# than compiling here. Everything lives in /opt/siegfried so it never
+# clashes with the regular obs-studio package; settings are shared with
+# OBS in ~/.config/obs-studio.
+#
+# Inputs (environment): SIEGFRIED_PKGVER, SIEGFRIED_STAGE (DESTDIR tree)
+
+pkgname=siegfried
+pkgver=${SIEGFRIED_PKGVER:-0.0.0}
+pkgrel=1
+pkgdesc="Streaming studio with native multistreaming and multichat (a fork of OBS Studio)"
+arch=(x86_64)
+url="https://github.com/Silkvain/obs-studio"
+license=('GPL-2.0-or-later')
+depends=(
+  alsa-lib curl ffmpeg fontconfig freetype2 jansson libglvnd libpipewire libpulse
+  libva libvpl libx11 libxcb libxcomposite libxinerama libxkbcommon luajit mbedtls
+  pciutils python qrcodegencpp-cmake qt6-base qt6-svg qt6-wayland librist rnnoise
+  speexdsp srt wayland x264
+)
+optdepends=(
+  'pipewire-jack: JACK audio capture'
+  'sndio: sndio audio capture'
+  'v4l2loopback-dkms: virtual camera'
+)
+options=(!debug !lto)
+
+package() {
+  cp -a "${SIEGFRIED_STAGE}/." "${pkgdir}/"
+
+  # Launcher on PATH and an app-menu entry
+  install -dm755 "${pkgdir}/usr/bin"
+  ln -s /opt/siegfried/bin/obs "${pkgdir}/usr/bin/siegfried"
+
+  local icon=/opt/siegfried/share/icons/hicolor/256x256/apps/com.obsproject.Studio.png
+  install -Dm644 /dev/stdin "${pkgdir}/usr/share/applications/siegfried.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Siegfried
+GenericName=Streaming Studio
+Comment=Multistream and multichat streaming studio (OBS Studio fork)
+Exec=/opt/siegfried/bin/obs
+Icon=${icon}
+Terminal=false
+Categories=AudioVideo;Recorder;Video;
+StartupWMClass=obs
+DESKTOP
+
+  # Keep OBS's own menu entry out of the way: Siegfried has its own
+  rm -rf "${pkgdir}/opt/siegfried/share/applications" "${pkgdir}/opt/siegfried/share/metainfo"
+}

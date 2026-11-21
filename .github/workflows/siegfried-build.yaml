@@ -1,0 +1,196 @@
+name: Siegfried Build
+run-name: Siegfried build ⚔️ (${{ github.ref_name }})
+
+# Builds Siegfried for Windows (installer + portable zip, using OBS's own
+# build scripts) and Linux (Arch/CachyOS package), then publishes both as
+# one GitHub Release. Runs on every push to the "multistream" branch, or on
+# demand from the Actions tab ("Run workflow").
+on:
+  push:
+    branches:
+      - multistream
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x64 🪟
+    runs-on: windows-2025-vs2026
+    outputs:
+      version: ${{ steps.installer.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fetch version tags 🏷️
+        # Forks don't copy upstream tags, but OBS derives its version from
+        # `git describe`, so pull the release tags from the official repo.
+        run: |
+          git fetch --force https://github.com/obsproject/obs-studio.git "refs/tags/*:refs/tags/*"
+          # Our own release tags (siegfried-build-N) aren't version numbers;
+          # drop them locally so `git describe` finds the OBS release tag.
+          git tag -l '*-build-*' | ForEach-Object { git tag -d $_ } | Out-Null
+
+      - name: Build OBS Studio 🧱
+        uses: ./.github/actions/build-obs
+        env:
+          # Built-in chat logins (see frontend/cmake/ui-multichat.cmake)
+          KICK_CLIENT_SECRET: ${{ secrets.KICK_CLIENT_SECRET }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+        with:
+          target: x64
+          config: RelWithDebInfo
+
+      - name: Package OBS Studio 📀
+        uses: ./.github/actions/package-obs
+        with:
+          target: x64
+          config: RelWithDebInfo
+          package: true
+
+      - name: Build installer 📦
+        id: installer
+        run: |
+          $zip = Get-ChildItem build_x64 -Filter 'obs-studio-*-windows-x64.zip' | Select-Object -First 1
+          if (-not $zip) { throw 'Packaged zip not found' }
+          $version = $zip.BaseName -replace '^obs-studio-', '' -replace '-windows-x64$', ''
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+
+          # Microsoft Visual C++ runtime, bundled so the installer works on a fresh PC
+          Invoke-WebRequest -Uri 'https://aka.ms/vc14/vc_redist.x64.exe' -OutFile vc_redist.x64.exe
+
+          $makensis = 'C:\Program Files (x86)\NSIS\makensis.exe'
+          if (-not (Test-Path $makensis)) {
+            choco install nsis -y --no-progress
+          }
+          & $makensis /V2 `
+            "/DAPPVERSION=$version" `
+            "/DSRCDIR=$PWD\staging" `
+            "/DVCREDIST=$PWD\vc_redist.x64.exe" `
+            "/DREPOROOT=$PWD" `
+            "/DOUTFILE=$PWD\dist\Siegfried-Setup-$version.exe" `
+            .github\installer\siegfried.nsi
+          if ($LASTEXITCODE -ne 0) { throw 'makensis failed' }
+
+          # Portable version: one plain zip (no zip-inside-a-zip)
+          Copy-Item $zip.FullName "dist\Siegfried-Portable-$version.zip"
+          Get-ChildItem dist
+
+      - name: Upload Windows files 📡
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: siegfried-windows
+          path: dist/*
+          if-no-files-found: error
+
+  linux-arch:
+    name: Linux (Arch / CachyOS) 🐧
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install build dependencies 📦
+        run: |
+          pacman -Syu --noconfirm --needed git cmake ninja extra-cmake-modules python swig luajit \
+            qt6-base qt6-svg qt6-wayland ffmpeg x264 curl jansson mbedtls libglvnd libva libvpl \
+            libx11 libxcb libxcomposite libxinerama libxkbcommon wayland wayland-protocols \
+            libpipewire libpulse alsa-lib speexdsp srt librist pciutils fontconfig freetype2 \
+            nlohmann-json asio websocketpp
+          # Nice-to-have extras: skip any that aren't available instead of failing
+          for p in rnnoise jack2 sndio uthash simde qrcodegencpp-cmake ffnvcodec-headers v4l-utils; do
+            pacman -S --noconfirm --needed "$p" || echo "::warning::skipped optional package $p"
+          done
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fetch version tags 🏷️
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --force https://github.com/obsproject/obs-studio.git "refs/tags/*:refs/tags/*"
+          git tag -l '*-build-*' | xargs -r git tag -d
+
+      - name: Build Siegfried 🧱
+        env:
+          KICK_CLIENT_SECRET: ${{ secrets.KICK_CLIENT_SECRET }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX=/opt/siegfried \
+            -DENABLE_RELOCATABLE=ON \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+            -DENABLE_BROWSER=OFF -DENABLE_AJA=OFF -DENABLE_WEBRTC=OFF \
+            -DENABLE_VLC=OFF -DENABLE_LIBFDK=OFF
+          cmake --build build
+          DESTDIR="$PWD/stage" cmake --install build
+
+      - name: Make Arch package 📦
+        run: |
+          version=$(git describe --tags --always)
+          pkgver=$(echo "$version" | sed -E 's/-([0-9]+)-g/.r\1.g/; s/-/./g')
+          useradd -m builder
+          mkdir pkg dist
+          cp .github/packaging/arch/PKGBUILD pkg/
+          chown -R builder pkg stage
+          su builder -c "cd pkg && SIEGFRIED_PKGVER='$pkgver' SIEGFRIED_STAGE='$PWD/stage' makepkg --nodeps --noconfirm"
+          cp pkg/*.pkg.tar.zst dist/
+          ls -la dist
+
+      - name: Upload Linux package 📡
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: siegfried-linux
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release 🚀
+    needs: [windows-x64, linux-arch]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.windows-x64.outputs.version }}
+        run: |
+          ls -la dist
+          cat > notes.md <<NOTES
+          Siegfried is a fork of OBS Studio with native multistreaming and multichat.
+
+          **Windows:** run \`Siegfried-Setup-$VERSION.exe\`. It installs alongside regular OBS (separate folder, same settings). Not code-signed yet, so SmartScreen may warn: *More info → Run anyway*.
+          Portable: unzip \`Siegfried-Portable-$VERSION.zip\` and run \`bin\\64bit\\obs64.exe\`.
+
+          **Linux (Arch / CachyOS):** \`sudo pacman -U siegfried-*.pkg.tar.zst\`, then open *Siegfried* from your app menu (or run \`siegfried\`). Installs to /opt/siegfried, alongside the regular obs-studio package.
+
+          Built from ${{ github.sha }}.
+          NOTES
+          gh release create "siegfried-build-${{ github.run_number }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Siegfried $VERSION (build ${{ github.run_number }})" \
+            --notes-file notes.md \
+            --latest
