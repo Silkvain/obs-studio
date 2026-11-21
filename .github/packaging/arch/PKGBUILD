@@ -16,7 +16,7 @@ url="https://github.com/Silkvain/obs-studio"
 license=('GPL-2.0-or-later')
 depends=(
   alsa-lib curl ffmpeg fontconfig freetype2 jansson libglvnd libpipewire libpulse
-  libva libvpl libx11 libxcb libxcomposite libxinerama libxkbcommon luajit mbedtls
+  libva libvpl libx11 libxcb libxcomposite libxinerama libxkbcommon luajit
   pciutils python qrcodegencpp-cmake qt6-base qt6-svg qt6-wayland librist rnnoise
   speexdsp srt wayland x264
 )

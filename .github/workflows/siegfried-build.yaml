@@ -16,6 +16,11 @@ on:
 permissions:
   contents: read
 
+# A newer push replaces any build of the same branch that's still running
+concurrency:
+  group: siegfried-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-x64:
     name: Windows x64 🪟
@@ -104,7 +109,7 @@ jobs:
       - name: Install build dependencies 📦
         run: |
           pacman -Syu --noconfirm --needed git cmake ninja extra-cmake-modules python swig luajit \
-            qt6-base qt6-svg qt6-wayland ffmpeg x264 curl jansson mbedtls libglvnd libva libvpl \
+            qt6-base qt6-svg qt6-wayland ffmpeg x264 curl jansson libglvnd libva libvpl vulkan-headers \
             libx11 libxcb libxcomposite libxinerama libxkbcommon wayland wayland-protocols \
             libpipewire libpulse alsa-lib speexdsp srt librist pciutils fontconfig freetype2 \
             nlohmann-json asio websocketpp
@@ -112,6 +117,19 @@ jobs:
           for p in rnnoise jack2 sndio uthash simde qrcodegencpp-cmake ffnvcodec-headers v4l-utils; do
             pacman -S --noconfirm --needed "$p" || echo "::warning::skipped optional package $p"
           done
+
+      - name: Build mbedTLS 3 (static) 🔐
+        # OBS 33 needs mbedTLS 3.x; Arch ships 4.x. Link a static 3.6 so the
+        # package doesn't depend on the system's mbedTLS version.
+        run: |
+          git clone --depth 1 --branch v3.6.2 --recurse-submodules --shallow-submodules \
+            https://github.com/Mbed-TLS/mbedtls.git /tmp/mbedtls
+          cmake -S /tmp/mbedtls -B /tmp/mbedtls/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF \
+            -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF \
+            -DCMAKE_INSTALL_PREFIX=/opt/mbedtls3
+          cmake --build /tmp/mbedtls/build
+          cmake --install /tmp/mbedtls/build
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -133,6 +151,7 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_INSTALL_PREFIX=/opt/siegfried \
+            -DCMAKE_PREFIX_PATH=/opt/mbedtls3 \
             -DENABLE_RELOCATABLE=ON \
             -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
             -DENABLE_BROWSER=OFF -DENABLE_AJA=OFF -DENABLE_WEBRTC=OFF \
