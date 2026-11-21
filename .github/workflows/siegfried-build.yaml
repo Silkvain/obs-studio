@@ -208,7 +208,8 @@ jobs:
 
           Built from ${{ github.sha }}.
           NOTES
-          gh release create "siegfried-build-${{ github.run_number }}" dist/* \
+          # run_number alone collided with an older tag; the commit makes it unique
+          gh release create "siegfried-build-${{ github.run_number }}-${GITHUB_SHA::7}" dist/* \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "Siegfried $VERSION (build ${{ github.run_number }})" \
