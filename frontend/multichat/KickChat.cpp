@@ -49,7 +49,7 @@ QString SiteBase()
 								: QStringLiteral("https://kick.com");
 }
 
-QByteArray Form(const QList<QPair<QString, QString>> &items)
+QByteArray Form(const QList<std::pair<QString, QString>> &items)
 {
 	QUrlQuery q;
 	for (const auto &i : items) {
@@ -142,7 +142,7 @@ void KickChat::LookupChatroom()
 {
 	/* Kick's website API sits behind Cloudflare and may refuse non-browser
 	 * clients. If it does, the user can paste the chatroom ID once. */
-	QList<QPair<QByteArray, QByteArray>> headers{
+	QList<std::pair<QByteArray, QByteArray>> headers{
 		{"Accept", "application/json"},
 		{"User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
 			       "Chrome/130.0 Safari/537.36"},
@@ -247,7 +247,7 @@ void KickChat::OnPusher(const QString &frame)
 void KickChat::Api(const QByteArray &verb, const QString &path, const QJsonObject &body,
 		   std::function<void(int, const QJsonObject &)> cb, bool retried)
 {
-	QList<QPair<QByteArray, QByteArray>> headers{
+	QList<std::pair<QByteArray, QByteArray>> headers{
 		{"Authorization", "Bearer " + Str("access_token").toUtf8()},
 		{"Accept", "application/json"},
 	};
@@ -387,11 +387,11 @@ void KickChat::Login(QWidget *)
 		oauth->deleteLater();
 	});
 	connect(oauth, &LoopbackOAuth::CodeReceived, this, [this, oauth](const QString &code) {
-		QList<QPair<QString, QString>> fields{{"grant_type", "authorization_code"},
-						      {"client_id", ClientId()},
-						      {"redirect_uri", oauth->RedirectUri()},
-						      {"code_verifier", oauth->CodeVerifier()},
-						      {"code", code}};
+		QList<std::pair<QString, QString>> fields{{"grant_type", "authorization_code"},
+							  {"client_id", ClientId()},
+							  {"redirect_uri", oauth->RedirectUri()},
+							  {"code_verifier", oauth->CodeVerifier()},
+							  {"code", code}};
 		if (!ClientSecret().isEmpty()) {
 			fields.append({"client_secret", ClientSecret()});
 		}
@@ -438,9 +438,9 @@ void KickChat::RefreshToken(std::function<void(bool)> done)
 		done(false);
 		return;
 	}
-	QList<QPair<QString, QString>> fields{{"grant_type", "refresh_token"},
-					      {"client_id", ClientId()},
-					      {"refresh_token", refresh}};
+	QList<std::pair<QString, QString>> fields{{"grant_type", "refresh_token"},
+						  {"client_id", ClientId()},
+						  {"refresh_token", refresh}};
 	if (!ClientSecret().isEmpty()) {
 		fields.append({"client_secret", ClientSecret()});
 	}

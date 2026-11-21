@@ -13,7 +13,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QObject>
-#include <QPair>
+#include <utility>
 #include <QString>
 #include <QUrl>
 
@@ -123,7 +123,7 @@ protected:
 	/* Small helper for JSON REST calls. The callback gets the HTTP status
 	 * (0 on network failure) and the parsed body. */
 	using JsonCallback = std::function<void(int status, const QJsonObject &body, const QByteArray &raw)>;
-	void Request(const QByteArray &verb, const QUrl &url, const QList<QPair<QByteArray, QByteArray>> &headers,
+	void Request(const QByteArray &verb, const QUrl &url, const QList<std::pair<QByteArray, QByteArray>> &headers,
 		     const QByteArray &body, const QByteArray &contentType, JsonCallback cb);
 
 	static QString EnvOr(const char *env, const char *fallback);

@@ -160,7 +160,7 @@ QString ChatConnector::EnvOr(const char *env, const char *fallback)
 }
 
 void ChatConnector::Request(const QByteArray &verb, const QUrl &url,
-			    const QList<QPair<QByteArray, QByteArray>> &headers, const QByteArray &body,
+			    const QList<std::pair<QByteArray, QByteArray>> &headers, const QByteArray &body,
 			    const QByteArray &contentType, JsonCallback cb)
 {
 	QNetworkRequest req(url);

@@ -30,7 +30,7 @@ QString ApiBase()
 		       : QStringLiteral("https://www.googleapis.com/youtube/v3");
 }
 
-QByteArray Form(const QList<QPair<QString, QString>> &items)
+QByteArray Form(const QList<std::pair<QString, QString>> &items)
 {
 	QUrlQuery q;
 	for (const auto &i : items) {
@@ -186,7 +186,7 @@ void YouTubeChat::Api(const QByteArray &verb, const QString &pathAndQuery, const
 		      std::function<void(int, const QJsonObject &)> cb, bool retried)
 {
 	auto send = [this, verb, pathAndQuery, body, cb, retried] {
-		QList<QPair<QByteArray, QByteArray>> headers{
+		QList<std::pair<QByteArray, QByteArray>> headers{
 			{"Authorization", "Bearer " + Str("access_token").toUtf8()}};
 		QByteArray data = body.isEmpty() ? QByteArray() : QJsonDocument(body).toJson(QJsonDocument::Compact);
 		Request(verb, QUrl(ApiBase() + pathAndQuery), headers, data,

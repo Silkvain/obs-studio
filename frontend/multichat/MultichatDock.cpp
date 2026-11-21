@@ -248,11 +248,11 @@ ChatUserCard::ChatUserCard(ChatHub *hub_, const ChatUser &user_, QWidget *parent
 	timeoutButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 	timeoutButton->setMinimumHeight(28);
 	QMenu *menu = new QMenu(timeoutButton);
-	const QList<QPair<QString, int>> durations{{tr("1 minute"), 60},
-						   {tr("10 minutes"), 600},
-						   {tr("1 hour"), 3600},
-						   {tr("24 hours"), 86400},
-						   {tr("7 days"), 604800}};
+	const QList<std::pair<QString, int>> durations{{tr("1 minute"), 60},
+						       {tr("10 minutes"), 600},
+						       {tr("1 hour"), 3600},
+						       {tr("24 hours"), 86400},
+						       {tr("7 days"), 604800}};
 	for (const auto &d : durations) {
 		int secs = d.second;
 		menu->addAction(d.first, this, [this, secs] { Moderate(secs); });

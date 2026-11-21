@@ -65,7 +65,7 @@ QString UnescapeTag(const QString &v)
 	return out;
 }
 
-QByteArray Form(const QList<QPair<QString, QString>> &items)
+QByteArray Form(const QList<std::pair<QString, QString>> &items)
 {
 	QUrlQuery q;
 	for (const auto &i : items) {
@@ -284,7 +284,7 @@ void TwitchChat::SendChat(const QString &text)
 void TwitchChat::Helix(const QByteArray &verb, const QString &path, const QJsonObject &body,
 		       std::function<void(int, const QJsonObject &)> cb, bool retried)
 {
-	QList<QPair<QByteArray, QByteArray>> headers{
+	QList<std::pair<QByteArray, QByteArray>> headers{
 		{"Client-Id", ClientId().toUtf8()},
 		{"Authorization", "Bearer " + Str("access_token").toUtf8()},
 	};
