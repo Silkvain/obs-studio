@@ -575,7 +575,6 @@ VerticalDock::VerticalDock(QWidget *parent, VerticalCanvas *vc_) : QWidget(paren
 
 	scenes = new QComboBox(this);
 	scenes->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-	scenes->setToolTip(QTStr("Vertical.SceneTooltip"));
 	QToolButton *addScene = SmallButton(this, QStringLiteral("+"), QTStr("Vertical.AddScene"));
 	QToolButton *removeScene = SmallButton(this, QStringLiteral("−"), QTStr("Vertical.RemoveScene"));
 	sceneMenu = SmallButton(this, QStringLiteral("⋯"), QTStr("Vertical.Options"));
@@ -677,6 +676,7 @@ VerticalDock::VerticalDock(QWidget *parent, VerticalCanvas *vc_) : QWidget(paren
 	connect(vc, &VerticalCanvas::CurrentSceneChanged, this, &VerticalDock::ConnectScene);
 	connect(vc, &VerticalCanvas::CanvasChanged, this, &VerticalDock::ConnectScene);
 	connect(vc, &VerticalCanvas::SettingsChanged, this, &VerticalDock::RefreshScenes);
+	connect(vc, &VerticalCanvas::MainSceneChanged, this, &VerticalDock::UpdateLinkTooltip);
 
 	RefreshScenes();
 	ConnectScene();
@@ -702,6 +702,44 @@ void VerticalDock::RefreshScenes()
 	sizeLabel->setText(vc->GetSize(cx, cy) ? QStringLiteral("%1×%2").arg(cx).arg(cy) : QString());
 	setEnabled(vc->GetCanvas() != nullptr);
 	updating = false;
+	UpdateLinkTooltip();
+}
+
+/* Link status on hover only: what this scene follows, and whether the main
+ * scene that's live right now has a vertical scene at all */
+void VerticalDock::UpdateLinkTooltip()
+{
+	OBSSource current = vc->CurrentScene();
+	if (!current) {
+		scenes->setToolTip(QString());
+		return;
+	}
+	QStringList lines;
+
+	QStringList linkedNames;
+	QStringList uuids = vc->LinkedMainScenes(current);
+	for (const QString &u : uuids) {
+		OBSSourceAutoRelease ms = obs_get_source_by_uuid(u.toUtf8().constData());
+		if (ms) {
+			linkedNames << QString::fromUtf8(obs_source_get_name(ms));
+		}
+	}
+	if (!linkedNames.isEmpty()) {
+		lines << QTStr("Vertical.Tip.Linked").arg(linkedNames.join(QStringLiteral(", ")));
+	} else {
+		lines << QTStr("Vertical.Tip.ByName").arg(QString::fromUtf8(obs_source_get_name(current)));
+	}
+
+	if (!vc->Linked()) {
+		lines << QTStr("Vertical.Tip.FollowOff");
+	} else {
+		OBSSourceAutoRelease live = obs_frontend_get_current_scene();
+		if (live && !vc->SceneForMain(live)) {
+			lines << QTStr("Vertical.Tip.NoMatch").arg(QString::fromUtf8(obs_source_get_name(live)),
+							   QString::fromUtf8(obs_source_get_name(current)));
+		}
+	}
+	scenes->setToolTip(lines.join('\n'));
 }
 
 void VerticalDock::ConnectScene()
@@ -835,6 +873,36 @@ void VerticalDock::ShowSceneMenu()
 {
 	QMenu menu(this);
 	menu.addAction(QTStr("Vertical.RenameScene"), this, &VerticalDock::RenameScene);
+
+	/* Pick the main scenes this vertical scene goes with */
+	OBSSource current = vc->CurrentScene();
+	if (current) {
+		QMenu *links = menu.addMenu(QTStr("Vertical.LinkedScenes"));
+		QStringList mine = vc->LinkedMainScenes(current);
+		obs_frontend_source_list mainScenes = {};
+		obs_frontend_get_scenes(&mainScenes);
+		for (size_t i = 0; i < mainScenes.sources.num; i++) {
+			obs_source_t *ms = mainScenes.sources.array[i];
+			QString uuid = QString::fromUtf8(obs_source_get_uuid(ms));
+			QString name = QString::fromUtf8(obs_source_get_name(ms));
+			/* Show where else it's linked, so moving a link is obvious */
+			OBSSource other = vc->SceneForMain(ms);
+			QString label = name;
+			if (other && other.Get() != current.Get() && vc->LinkedMainScenes(other).contains(uuid)) {
+				label = QTStr("Vertical.LinkedElsewhere").arg(name, QString::fromUtf8(obs_source_get_name(other)));
+			}
+			QAction *a = links->addAction(label);
+			a->setCheckable(true);
+			a->setChecked(mine.contains(uuid));
+			OBSSource msRef = ms;
+			connect(a, &QAction::toggled, this,
+				[this, current, msRef](bool on) { vc->SetSceneLink(current, msRef, on); });
+		}
+		obs_frontend_source_list_free(&mainScenes);
+		if (links->isEmpty()) {
+			links->setEnabled(false);
+		}
+	}
 	menu.addSeparator();
 	QAction *linked = menu.addAction(QTStr("Vertical.Linked"));
 	linked->setCheckable(true);

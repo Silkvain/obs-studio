@@ -176,8 +176,7 @@ void VerticalCanvas::EnsureCanvas()
 	if (linked) {
 		OBSSourceAutoRelease mainScene = obs_frontend_get_current_scene();
 		if (mainScene) {
-			pick = obs_canvas_get_source_by_name(found, obs_source_get_name(mainScene));
-			obs_source_release(pick); /* get_source_by_name adds a ref */
+			pick = SceneForMain(mainScene);
 		}
 	}
 	if (!pick) {
@@ -422,18 +421,98 @@ bool VerticalCanvas::RenameScene(obs_source_t *scene, const QString &name)
 	return true;
 }
 
+/* Explicit links live in the vertical scene's private settings, so they're
+ * saved with the scene collection. A main scene links to at most one
+ * vertical scene; one vertical scene can serve many main scenes. */
+static constexpr const char *kLinksKey = "siegfried_linked_main_scenes";
+
+QStringList VerticalCanvas::LinkedMainScenes(obs_source_t *verticalScene) const
+{
+	QStringList uuids;
+	if (!verticalScene) {
+		return uuids;
+	}
+	OBSDataAutoRelease priv = obs_source_get_private_settings(verticalScene);
+	OBSDataArrayAutoRelease arr = obs_data_get_array(priv, kLinksKey);
+	for (size_t i = 0; i < obs_data_array_count(arr); i++) {
+		OBSDataAutoRelease item = obs_data_array_item(arr, i);
+		uuids.push_back(QString::fromUtf8(obs_data_get_string(item, "uuid")));
+	}
+	return uuids;
+}
+
+static void WriteLinks(obs_source_t *verticalScene, const QStringList &uuids)
+{
+	OBSDataAutoRelease priv = obs_source_get_private_settings(verticalScene);
+	OBSDataArrayAutoRelease arr = obs_data_array_create();
+	for (const QString &u : uuids) {
+		OBSDataAutoRelease item = obs_data_create();
+		obs_data_set_string(item, "uuid", u.toUtf8().constData());
+		obs_data_array_push_back(arr, item);
+	}
+	obs_data_set_array(priv, kLinksKey, arr);
+}
+
+void VerticalCanvas::SetSceneLink(obs_source_t *verticalScene, obs_source_t *mainScene, bool linkOn)
+{
+	if (!verticalScene || !mainScene) {
+		return;
+	}
+	QString uuid = QString::fromUtf8(obs_source_get_uuid(mainScene));
+	/* A main scene can only lead to one vertical scene */
+	for (const OBSSource &vs : Scenes()) {
+		QStringList links = LinkedMainScenes(vs);
+		bool changed = links.removeAll(uuid) > 0;
+		if (vs.Get() == verticalScene && linkOn) {
+			links.push_back(uuid);
+			changed = true;
+		}
+		if (changed) {
+			WriteLinks(vs, links);
+		}
+	}
+	RequestSave();
+	emit SettingsChanged();
+
+	/* Apply straight away if that main scene is live */
+	if (linkOn) {
+		OBSSourceAutoRelease current = obs_frontend_get_current_scene();
+		if (current.Get() == mainScene) {
+			SetCurrentScene(verticalScene);
+		}
+	}
+}
+
+OBSSource VerticalCanvas::SceneForMain(obs_source_t *mainScene) const
+{
+	OBSCanvasAutoRelease canvas = GetCanvas();
+	if (!canvas || !mainScene) {
+		return nullptr;
+	}
+	/* 1. Explicit link */
+	QString uuid = QString::fromUtf8(obs_source_get_uuid(mainScene));
+	for (const OBSSource &vs : Scenes()) {
+		if (LinkedMainScenes(vs).contains(uuid)) {
+			return vs;
+		}
+	}
+	/* 2. Same name */
+	OBSSourceAutoRelease match = obs_canvas_get_source_by_name(canvas, obs_source_get_name(mainScene));
+	if (match && obs_source_is_scene(match)) {
+		return OBSSource(match.Get());
+	}
+	return nullptr;
+}
+
 void VerticalCanvas::FollowMainScene()
 {
+	emit MainSceneChanged();
 	if (!linked) {
 		return;
 	}
-	OBSCanvasAutoRelease canvas = GetCanvas();
 	OBSSourceAutoRelease mainScene = obs_frontend_get_current_scene();
-	if (!canvas || !mainScene) {
-		return;
-	}
-	OBSSourceAutoRelease match = obs_canvas_get_source_by_name(canvas, obs_source_get_name(mainScene));
-	if (match && obs_source_is_scene(match)) {
+	OBSSource match = SceneForMain(mainScene);
+	if (match) {
 		SetCurrentScene(match);
 	}
 }

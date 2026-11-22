@@ -26,6 +26,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <mutex>
 #include <vector>
@@ -58,7 +59,13 @@ public:
 	/* Copy every source of a main scene into the current vertical scene */
 	void CopyFromMainScene(obs_source_t *mainScene);
 
-	/* Vertical scene follows the main scene with the same name */
+	/* Links: which main scenes switch to this vertical scene. Without an
+	 * explicit link, a vertical scene with the same name is used. */
+	QStringList LinkedMainScenes(obs_source_t *verticalScene) const;
+	void SetSceneLink(obs_source_t *verticalScene, obs_source_t *mainScene, bool linked);
+	OBSSource SceneForMain(obs_source_t *mainScene) const;
+
+	/* Vertical scene follows the main scene (links, then same name) */
 	bool Linked() const { return linked; }
 	void SetLinked(bool on);
 
@@ -84,6 +91,7 @@ signals:
 	void ScenesChanged();
 	void CurrentSceneChanged();
 	void SettingsChanged();
+	void MainSceneChanged();
 
 private:
 	static void FrontendEvent(obs_frontend_event event, void *data);

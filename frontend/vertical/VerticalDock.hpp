@@ -77,6 +77,7 @@ private slots:
 	void RefreshSources();
 	void QueueRefreshSources();
 	void ConnectScene();
+	void UpdateLinkTooltip();
 
 private:
 	static void SceneSignal(void *data, calldata_t *cd);
