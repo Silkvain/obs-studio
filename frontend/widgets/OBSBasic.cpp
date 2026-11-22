@@ -1111,6 +1111,12 @@ void OBSBasic::OBSInit()
 	}
 #endif
 
+	/* First launch: open maximized; the default size is too small for
+	 * the preview plus Vertical, Chat and Activity */
+	if (!config_get_string(App()->GetUserConfig(), "BasicWindow", "geometry")) {
+		setWindowState(windowState() | Qt::WindowMaximized);
+	}
+
 	bool alwaysOnTop = config_get_bool(App()->GetUserConfig(), "BasicWindow", "AlwaysOnTop");
 
 #ifdef ENABLE_WAYLAND
@@ -1288,9 +1294,11 @@ void OBSBasic::OBSInit()
 		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 	}
 
-	if (!first_run && !has_last_version && !Active()) {
-		QMetaObject::invokeMethod(this, &OBSBasic::on_autoConfigure_triggered, Qt::QueuedConnection);
-	}
+	/* Siegfried: no wizard popping up on first launch. It locks the whole
+	 * main window until closed, and on tiling window managers (Hyprland)
+	 * it can open behind the main window, so the app looks frozen.
+	 * It's still in Tools > Auto-Configuration Wizard. */
+	(void)has_last_version;
 
 #if (defined(_WIN32) || defined(__APPLE__)) && (OBS_RELEASE_CANDIDATE > 0 || OBS_BETA > 0)
 	/* Automatically set branch to "beta" the first time a pre-release build is run. */
