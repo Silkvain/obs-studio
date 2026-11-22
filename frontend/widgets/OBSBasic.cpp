@@ -25,6 +25,7 @@
 #include "OBSBasicStats.hpp"
 #include "docks/MultistreamDock.hpp"
 #include "multichat/MultichatDock.hpp"
+#include "multichat/ChatOverlaySource.hpp"
 #include "vertical/VerticalCanvas.hpp"
 #include "vertical/VerticalDock.hpp"
 #include "plugin-manager/PluginManager.hpp"
@@ -969,6 +970,9 @@ void OBSBasic::OBSInit()
 
 	App()->loadAppModules();
 
+	/* Siegfried: "Chat (all platforms)" source, before any collection loads */
+	ChatOverlay::Register();
+
 #ifdef BROWSER_AVAILABLE
 	cef = obs_browser_init_panel();
 	cef_js_avail = cef && obs_browser_qcef_version() >= 3;
@@ -1150,6 +1154,7 @@ void OBSBasic::OBSInit()
 
 	/* setup multichat */
 	chatHub = new ChatHub(this);
+	ChatOverlay::AttachHub(chatHub);
 	multichatDock->setWidget(new MultichatDock(multichatDock, chatHub));
 	chatTargetsDock->setWidget(new ChatTargetsPanel(chatTargetsDock, chatHub));
 	chatHub->StartAll();

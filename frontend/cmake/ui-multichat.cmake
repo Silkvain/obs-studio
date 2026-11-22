@@ -20,6 +20,8 @@ target_sources(
     multichat/ChatSocket.hpp
     multichat/ChatHub.cpp
     multichat/ChatHub.hpp
+    multichat/ChatOverlaySource.cpp
+    multichat/ChatOverlaySource.hpp
     multichat/KickChat.cpp
     multichat/KickChat.hpp
     multichat/MultichatDock.cpp

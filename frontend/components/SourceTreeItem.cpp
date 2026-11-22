@@ -101,7 +101,11 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_) : tre
 	switch (obs_source_load_state(sourceId)) {
 	case OBS_MODULE_DISABLED:
 	case OBS_MODULE_MISSING:
-		idian::Utils::addClass(label, "text-danger");
+		/* Siegfried's own sources (e.g. the chat source) are built in,
+		 * not from a module: only flag types that really don't exist */
+		if (!obs_source_get_display_name(sourceId)) {
+			idian::Utils::addClass(label, "text-danger");
+		}
 		break;
 	default:
 		break;
