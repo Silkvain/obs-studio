@@ -6,4 +6,5 @@ target_sources(
     vertical/VerticalCanvas.hpp
     vertical/VerticalDock.cpp
     vertical/VerticalDock.hpp
+    widgets/OBSBasic_Vertical.cpp
 )

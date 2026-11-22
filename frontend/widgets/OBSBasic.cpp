@@ -277,16 +277,6 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	addDockWidget(Qt::RightDockWidgetArea, multichatDock);
 	resizeDocks({multichatDock}, {std::min(width() * 25 / 100, 380)}, Qt::Horizontal);
 
-	/* Vertical (9:16) canvas: its own preview, scenes and sources */
-	verticalDock = new OBSDock();
-	verticalDock->setObjectName(QStringLiteral("verticalDock"));
-	verticalDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
-				  QDockWidget::DockWidgetFloatable);
-	verticalDock->setWindowTitle(QTStr("Vertical.DockTitle"));
-	addDockWidget(Qt::RightDockWidgetArea, verticalDock);
-	splitDockWidget(verticalDock, multichatDock, Qt::Horizontal);
-	resizeDocks({verticalDock}, {std::min(width() * 18 / 100, 300)}, Qt::Horizontal);
-
 	/* Activity (follows, subs, raids...), under the chat */
 	activityDock = new OBSDock();
 	activityDock->setObjectName(QStringLiteral("activityDock"));
@@ -470,7 +460,6 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(statsDock);
 	SETUP_DOCK(chatTargetsDock);
 	SETUP_DOCK(multichatDock);
-	SETUP_DOCK(verticalDock);
 	SETUP_DOCK(activityDock);
 #undef SETUP_DOCK
 
@@ -1187,7 +1176,7 @@ void OBSBasic::OBSInit()
 
 	/* setup vertical canvas */
 	vertical = new VerticalCanvas(this);
-	verticalDock->setWidget(new VerticalDock(verticalDock, vertical));
+	SetupVerticalUI();
 
 	/* ----------------------------- */
 	/* add custom browser docks      */
@@ -1250,18 +1239,6 @@ void OBSBasic::OBSInit()
 		}
 		activityDock->setVisible(true);
 		config_set_bool(App()->GetUserConfig(), "Activity", "DockIntroduced", true);
-	}
-	if (!config_get_bool(App()->GetUserConfig(), "Vertical", "DockIntroduced")) {
-		/* Saved layouts predate this dock: put it between the preview and chat */
-		verticalDock->setFloating(false);
-		addDockWidget(Qt::RightDockWidgetArea, verticalDock);
-		if (multichatDock && !multichatDock->isFloating() && multichatDock->isVisible()) {
-			splitDockWidget(multichatDock, verticalDock, Qt::Horizontal);
-			splitDockWidget(verticalDock, multichatDock, Qt::Horizontal);
-		}
-		resizeDocks({verticalDock}, {std::min(width() * 18 / 100, 300)}, Qt::Horizontal);
-		verticalDock->setVisible(true);
-		config_set_bool(App()->GetUserConfig(), "Vertical", "DockIntroduced", true);
 	}
 	if (!config_get_bool(App()->GetUserConfig(), "Multichat", "DockIntroduced")) {
 		multichatDock->setVisible(true);
@@ -1889,6 +1866,7 @@ void OBSBasic::saveAll()
 
 		config_set_string(App()->GetUserConfig(), "BasicWindow", "DockState",
 				  saveState().toBase64().constData());
+		SaveVerticalUI();
 
 #ifdef BROWSER_AVAILABLE
 		if (cef) {

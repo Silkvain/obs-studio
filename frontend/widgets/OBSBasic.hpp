@@ -63,6 +63,10 @@ class VolumeControl;
 class MultistreamManager;
 class ChatHub;
 class VerticalCanvas;
+class VerticalPane;
+class QSplitter;
+class QStackedWidget;
+class QTabBar;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
 #endif
@@ -455,7 +459,15 @@ private:
 	QPointer<QDockWidget> multichatDock;
 	ChatHub *chatHub = nullptr;
 	VerticalCanvas *vertical = nullptr;
-	QPointer<QDockWidget> verticalDock;
+	QPointer<QSplitter> canvasSplitter;
+	QPointer<QTabBar> scenesCanvasTabs;
+	QPointer<QTabBar> sourcesCanvasTabs;
+	QPointer<QStackedWidget> scenesCanvasStack;
+	QPointer<QStackedWidget> sourcesCanvasStack;
+	QPointer<VerticalPane> verticalPane;
+	QPointer<QAction> showVerticalPreview;
+	void SetupVerticalUI();
+	void SaveVerticalUI();
 	QPointer<QDockWidget> activityDock;
 	QByteArray startingDockLayout;
 	QStringList extraDockNames;
@@ -1169,6 +1181,8 @@ private:
 
 public:
 	VerticalCanvas *GetVerticalCanvas() const noexcept { return vertical; }
+	/* 0 = main canvas, 1 = vertical: the Scenes/Sources tabs */
+	void SetCanvasTab(int index);
 	ChatHub *GetChatHub() const noexcept { return chatHub; }
 
 	/* Siegfried: Scene Collection > Import Assets (overlay bundles) */

@@ -89,7 +89,6 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	controlsDock->setVisible(true);
 	chatTargetsDock->setVisible(true);
 	multichatDock->setVisible(true);
-	verticalDock->setVisible(true);
 	activityDock->setVisible(true);
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
@@ -103,7 +102,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	int rest = std::max(cx - sendW, 0);
 	resizeDocks(bottomDocks, {rest * 55 / 100, rest * 20 / 100, rest * 25 / 100, sendW}, Qt::Horizontal);
 
-	resizeDocks({verticalDock, multichatDock}, {std::min(cx * 18 / 100, 300), std::min(cx * 25 / 100, 380)},
+	resizeDocks({multichatDock}, {std::min(cx * 25 / 100, 380)},
 		    Qt::Horizontal);
 
 	int sideDockWidth = std::min(width() * 30 / 100, 280);
@@ -129,7 +128,6 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	controlsDock->setFeatures(mainFeatures);
 	statsDock->setFeatures(features);
 	multichatDock->setFeatures(features);
-	verticalDock->setFeatures(features);
 	activityDock->setFeatures(features);
 	chatTargetsDock->setFeatures(lock ? QDockWidget::NoDockWidgetFeatures : QDockWidget::DockWidgetMovable);
 

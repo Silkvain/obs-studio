@@ -11,6 +11,8 @@
 #include "VerticalCanvas.hpp"
 
 #include <OBSApp.hpp>
+#include <widgets/OBSBasic.hpp>
+#include <Idian/Utils.hpp>
 #include <utility/display-helpers.hpp>
 #include <qt-wrappers.hpp>
 
@@ -18,7 +20,7 @@
 #include <graphics/matrix4.h>
 #include <graphics/vec4.h>
 
-#include <QComboBox>
+#include <QCheckBox>
 #include <QContextMenuEvent>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -28,7 +30,8 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
-#include <QToolButton>
+#include <QTimer>
+#include <QToolBar>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -391,6 +394,7 @@ void VerticalPreview::ScaleAroundCenter(obs_sceneitem_t *item, float factor)
 void VerticalPreview::mousePressEvent(QMouseEvent *event)
 {
 	OBSQTDisplay::mousePressEvent(event);
+	emit Activated();
 	if (event->button() != Qt::LeftButton) {
 		return;
 	}
@@ -557,168 +561,167 @@ void VerticalPreview::contextMenuEvent(QContextMenuEvent *event)
 }
 
 /* ------------------------------------------------------------------------ */
-/* Dock                                                                     */
+/* Pane beside the main preview                                             */
 
-static QToolButton *SmallButton(QWidget *parent, const QString &text, const QString &tip)
+VerticalPane::VerticalPane(QWidget *parent, VerticalCanvas *vc_) : QWidget(parent), vc(vc_)
 {
-	QToolButton *b = new QToolButton(parent);
-	b->setText(text);
-	b->setToolTip(tip);
-	b->setAutoRaise(true);
-	return b;
-}
+	title = new QLabel(this);
+	title->setStyleSheet("color: palette(placeholder-text);");
+	title->setAlignment(Qt::AlignCenter);
 
-VerticalDock::VerticalDock(QWidget *parent, VerticalCanvas *vc_) : QWidget(parent), vc(vc_)
-{
 	preview = new VerticalPreview(this, vc);
 	preview->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-	scenes = new QComboBox(this);
-	scenes->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-	QToolButton *addScene = SmallButton(this, QStringLiteral("+"), QTStr("Vertical.AddScene"));
-	QToolButton *removeScene = SmallButton(this, QStringLiteral("−"), QTStr("Vertical.RemoveScene"));
-	sceneMenu = SmallButton(this, QStringLiteral("⋯"), QTStr("Vertical.Options"));
-
-	QHBoxLayout *sceneRow = new QHBoxLayout();
-	sceneRow->setContentsMargins(0, 0, 0, 0);
-	sceneRow->setSpacing(2);
-	sceneRow->addWidget(scenes, 1);
-	sceneRow->addWidget(addScene);
-	sceneRow->addWidget(removeScene);
-	sceneRow->addWidget(sceneMenu);
-
-	sources = new QListWidget(this);
-	sources->setMaximumHeight(150);
-	sources->setSelectionMode(QAbstractItemView::SingleSelection);
-
-	addSource = SmallButton(this, QTStr("Vertical.AddSource"), QTStr("Vertical.AddSourceTooltip"));
-	QToolButton *removeSource = SmallButton(this, QStringLiteral("−"), QTStr("Vertical.RemoveSource"));
-	QToolButton *up = SmallButton(this, QStringLiteral("↑"), QTStr("Vertical.Order.Up"));
-	QToolButton *down = SmallButton(this, QStringLiteral("↓"), QTStr("Vertical.Order.Down"));
-	sizeLabel = new QLabel(this);
-	sizeLabel->setStyleSheet("color: palette(placeholder-text);");
-
-	QHBoxLayout *sourceRow = new QHBoxLayout();
-	sourceRow->setContentsMargins(0, 0, 0, 0);
-	sourceRow->setSpacing(2);
-	sourceRow->addWidget(addSource);
-	sourceRow->addWidget(removeSource);
-	sourceRow->addWidget(up);
-	sourceRow->addWidget(down);
-	sourceRow->addStretch(1);
-	sourceRow->addWidget(sizeLabel);
+	preview->setMinimumWidth(90);
 
 	QVBoxLayout *layout = new QVBoxLayout(this);
-	layout->setContentsMargins(4, 4, 4, 4);
-	layout->setSpacing(4);
+	layout->setContentsMargins(0, 0, 0, 0);
+	layout->setSpacing(2);
 	layout->addWidget(preview, 1);
-	layout->addLayout(sceneRow);
-	layout->addWidget(sources);
-	layout->addLayout(sourceRow);
+	layout->addWidget(title);
 
-	connect(scenes, &QComboBox::activated, this, [this](int index) {
-		OBSSource s = scenes->itemData(index).value<OBSSource>();
+	connect(vc, &VerticalCanvas::CanvasChanged, this, &VerticalPane::UpdateTitle);
+	connect(vc, &VerticalCanvas::CurrentSceneChanged, this, &VerticalPane::UpdateTitle);
+	connect(vc, &VerticalCanvas::ScenesChanged, this, &VerticalPane::UpdateTitle);
+	connect(vc, &VerticalCanvas::SettingsChanged, this, &VerticalPane::UpdateTitle);
+	UpdateTitle();
+}
+
+void VerticalPane::UpdateTitle()
+{
+	uint32_t cx = 0, cy = 0;
+	QString text = QTStr("Vertical.PaneTitle");
+	if (vc->GetSize(cx, cy)) {
+		text += QStringLiteral(" · %1×%2").arg(cx).arg(cy);
+	}
+	if (OBSSource s = vc->CurrentScene()) {
+		text += QStringLiteral(" · ") + QString::fromUtf8(obs_source_get_name(s));
+	}
+	title->setText(text);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Shared toolbar helpers: same look as the main Scenes/Sources toolbars    */
+
+static QAction *ToolAction(QToolBar *bar, const char *iconClass, const char *icon, const QString &tip)
+{
+	QAction *a = new QAction(bar);
+	a->setIcon(QIcon(QString::fromUtf8(icon)));
+	a->setToolTip(tip);
+	a->setText(tip);
+	a->setProperty("class", QString::fromUtf8(iconClass));
+	bar->addAction(a);
+	return a;
+}
+
+static QToolBar *MakeToolbar(QWidget *parent)
+{
+	QToolBar *bar = new QToolBar(parent);
+	bar->setIconSize(QSize(16, 16));
+	bar->setFloatable(false);
+	bar->setMovable(false);
+	return bar;
+}
+
+static void FinishToolbar(QToolBar *bar)
+{
+	/* Themes style the buttons through the actions' dynamic properties */
+	for (QAction *a : bar->actions()) {
+		if (QWidget *w = bar->widgetForAction(a)) {
+			for (const QByteArray &name : a->dynamicPropertyNames()) {
+				w->setProperty(name.constData(), a->property(name.constData()));
+			}
+		}
+	}
+	RefreshToolBarStyling(bar);
+}
+
+static QListWidget *MakeList(QWidget *parent)
+{
+	QListWidget *list = new QListWidget(parent);
+	list->setSelectionMode(QAbstractItemView::SingleSelection);
+	list->setFrameShape(QFrame::NoFrame);
+	list->setContextMenuPolicy(Qt::CustomContextMenu);
+	return list;
+}
+
+static QFrame *MakeFrame(QWidget *parent, QListWidget *list, QToolBar *bar)
+{
+	QFrame *frame = new QFrame(parent);
+	QVBoxLayout *inner = new QVBoxLayout(frame);
+	inner->setContentsMargins(0, 0, 0, 0);
+	inner->setSpacing(0);
+	inner->addWidget(list, 1);
+	inner->addWidget(bar);
+
+	QVBoxLayout *outer = new QVBoxLayout(parent);
+	outer->setContentsMargins(0, 0, 0, 0);
+	outer->addWidget(frame);
+	return frame;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Scenes panel                                                             */
+
+VerticalScenesPanel::VerticalScenesPanel(QWidget *parent, VerticalCanvas *vc_) : QWidget(parent), vc(vc_)
+{
+	list = MakeList(this);
+	list->setMouseTracking(true);
+	toolbar = MakeToolbar(this);
+	QAction *add = ToolAction(toolbar, "icon-plus", ":/res/images/plus.svg", QTStr("Vertical.AddScene"));
+	QAction *remove = ToolAction(toolbar, "icon-trash", ":/res/images/minus.svg", QTStr("Vertical.RemoveScene"));
+	toolbar->addSeparator();
+	optionsAction = ToolAction(toolbar, "icon-dots-vert", ":/res/images/dots-vert.svg", QTStr("Vertical.Options"));
+	MakeFrame(this, list, toolbar);
+	FinishToolbar(toolbar);
+
+	connect(add, &QAction::triggered, this, &VerticalScenesPanel::AddScene);
+	connect(remove, &QAction::triggered, this, &VerticalScenesPanel::RemoveScene);
+	connect(optionsAction, &QAction::triggered, this, &VerticalScenesPanel::ShowOptionsMenu);
+
+	connect(list, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *li) {
+		if (updating || !li) {
+			return;
+		}
+		OBSSource s = li->data(Qt::UserRole).value<OBSSource>();
 		if (s) {
 			vc->SetCurrentScene(s);
 		}
 	});
-	connect(addScene, &QToolButton::clicked, this, &VerticalDock::AddScene);
-	connect(removeScene, &QToolButton::clicked, this, &VerticalDock::RemoveScene);
-	connect(sceneMenu, &QToolButton::clicked, this, &VerticalDock::ShowSceneMenu);
-	connect(addSource, &QToolButton::clicked, this, &VerticalDock::ShowAddMenu);
-	connect(removeSource, &QToolButton::clicked, this, [this] {
-		if (OBSSceneItem item = SelectedItem()) {
-			obs_sceneitem_remove(item);
-		}
-	});
-	connect(up, &QToolButton::clicked, this, [this] {
-		if (OBSSceneItem item = SelectedItem()) {
-			obs_sceneitem_set_order(item, OBS_ORDER_MOVE_UP);
-		}
-	});
-	connect(down, &QToolButton::clicked, this, [this] {
-		if (OBSSceneItem item = SelectedItem()) {
-			obs_sceneitem_set_order(item, OBS_ORDER_MOVE_DOWN);
-		}
-	});
+	connect(list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { RenameScene(); });
+	connect(list, &QListWidget::customContextMenuRequested, this, &VerticalScenesPanel::ShowContextMenu);
 
-	connect(sources, &QListWidget::currentRowChanged, this, [this](int) {
-		if (updating) {
-			return;
-		}
-		QListWidgetItem *li = sources->currentItem();
-		OBSSceneItem target = li ? li->data(Qt::UserRole).value<OBSSceneItem>() : nullptr;
-		OBSScene scene = SceneOf(vc);
-		if (!scene) {
-			return;
-		}
-		auto cb = [](obs_scene_t *, obs_sceneitem_t *item, void *param) {
-			bool want = item == static_cast<obs_sceneitem_t *>(param);
-			if (obs_sceneitem_selected(item) != want) {
-				obs_sceneitem_select(item, want);
-			}
-			return true;
-		};
-		obs_scene_enum_items(scene, cb, target.Get());
-	});
-	connect(sources, &QListWidget::itemChanged, this, [this](QListWidgetItem *li) {
-		if (updating) {
-			return;
-		}
-		OBSSceneItem item = li->data(Qt::UserRole).value<OBSSceneItem>();
-		if (item) {
-			obs_sceneitem_set_visible(item, li->checkState() == Qt::Checked);
-		}
-	});
-
-	connect(preview, &VerticalPreview::SelectionChanged, this, &VerticalDock::QueueRefreshSources);
-	connect(vc, &VerticalCanvas::ScenesChanged, this, &VerticalDock::RefreshScenes);
-	connect(vc, &VerticalCanvas::CurrentSceneChanged, this, &VerticalDock::ConnectScene);
-	connect(vc, &VerticalCanvas::CanvasChanged, this, &VerticalDock::ConnectScene);
-	connect(vc, &VerticalCanvas::SettingsChanged, this, &VerticalDock::RefreshScenes);
-	connect(vc, &VerticalCanvas::MainSceneChanged, this, &VerticalDock::UpdateLinkTooltip);
-
-	RefreshScenes();
-	ConnectScene();
+	connect(vc, &VerticalCanvas::ScenesChanged, this, &VerticalScenesPanel::Refresh);
+	connect(vc, &VerticalCanvas::CurrentSceneChanged, this, &VerticalScenesPanel::Refresh);
+	connect(vc, &VerticalCanvas::CanvasChanged, this, &VerticalScenesPanel::Refresh);
+	connect(vc, &VerticalCanvas::SettingsChanged, this, &VerticalScenesPanel::Refresh);
+	connect(vc, &VerticalCanvas::MainSceneChanged, this, &VerticalScenesPanel::UpdateTooltips);
+	Refresh();
 }
 
-VerticalDock::~VerticalDock()
-{
-	sceneSignals.clear();
-}
-
-void VerticalDock::RefreshScenes()
+void VerticalScenesPanel::Refresh()
 {
 	updating = true;
-	scenes->clear();
+	list->clear();
 	OBSSource current = vc->CurrentScene();
 	for (const OBSSource &s : vc->Scenes()) {
-		scenes->addItem(QString::fromUtf8(obs_source_get_name(s)), QVariant::fromValue(s));
+		QListWidgetItem *li = new QListWidgetItem(QString::fromUtf8(obs_source_get_name(s)));
+		li->setData(Qt::UserRole, QVariant::fromValue(s));
+		list->addItem(li);
 		if (s == current) {
-			scenes->setCurrentIndex(scenes->count() - 1);
+			list->setCurrentItem(li);
 		}
 	}
-	uint32_t cx, cy;
-	sizeLabel->setText(vc->GetSize(cx, cy) ? QStringLiteral("%1×%2").arg(cx).arg(cy) : QString());
 	setEnabled(vc->GetCanvas() != nullptr);
 	updating = false;
-	UpdateLinkTooltip();
+	UpdateTooltips();
 }
 
-/* Link status on hover only: what this scene follows, and whether the main
- * scene that's live right now has a vertical scene at all */
-void VerticalDock::UpdateLinkTooltip()
+/* Link status on hover only */
+QString VerticalScenesPanel::LinkTooltip(obs_source_t *scene) const
 {
-	OBSSource current = vc->CurrentScene();
-	if (!current) {
-		scenes->setToolTip(QString());
-		return;
-	}
 	QStringList lines;
-
 	QStringList linkedNames;
-	QStringList uuids = vc->LinkedMainScenes(current);
-	for (const QString &u : uuids) {
+	for (const QString &u : vc->LinkedMainScenes(scene)) {
 		OBSSourceAutoRelease ms = obs_get_source_by_uuid(u.toUtf8().constData());
 		if (ms) {
 			linkedNames << QString::fromUtf8(obs_source_get_name(ms));
@@ -727,183 +730,87 @@ void VerticalDock::UpdateLinkTooltip()
 	if (!linkedNames.isEmpty()) {
 		lines << QTStr("Vertical.Tip.Linked").arg(linkedNames.join(QStringLiteral(", ")));
 	} else {
-		lines << QTStr("Vertical.Tip.ByName").arg(QString::fromUtf8(obs_source_get_name(current)));
+		lines << QTStr("Vertical.Tip.ByName").arg(QString::fromUtf8(obs_source_get_name(scene)));
 	}
-
 	if (!vc->Linked()) {
 		lines << QTStr("Vertical.Tip.FollowOff");
-	} else {
+	} else if (scene == vc->CurrentScene().Get()) {
 		OBSSourceAutoRelease live = obs_frontend_get_current_scene();
 		if (live && !vc->SceneForMain(live)) {
 			lines << QTStr("Vertical.Tip.NoMatch").arg(QString::fromUtf8(obs_source_get_name(live)),
-							   QString::fromUtf8(obs_source_get_name(current)));
+							   QString::fromUtf8(obs_source_get_name(scene)));
 		}
 	}
-	scenes->setToolTip(lines.join('\n'));
+	return lines.join('\n');
 }
 
-void VerticalDock::ConnectScene()
+void VerticalScenesPanel::UpdateTooltips()
 {
-	sceneSignals.clear();
-	OBSSource scene = vc->CurrentScene();
-	connectedScene = OBSGetWeakRef(scene);
-	if (scene) {
-		signal_handler_t *sh = obs_source_get_signal_handler(scene);
-		for (const char *sig : {"item_add", "item_remove", "reorder", "refresh", "item_visible", "item_select",
-					"item_deselect"}) {
-			sceneSignals.emplace_back(sh, sig, SceneSignal, this);
-		}
-		sceneSignals.emplace_back(sh, "item_transform", TransformSignal, this);
-	}
-	RefreshScenes();
-	RefreshSources();
-}
-
-void VerticalDock::SceneSignal(void *data, calldata_t *)
-{
-	auto *self = static_cast<VerticalDock *>(data);
-	QMetaObject::invokeMethod(self, &VerticalDock::QueueRefreshSources, Qt::QueuedConnection);
-	QMetaObject::invokeMethod(self->vc, &VerticalCanvas::RequestSave, Qt::QueuedConnection);
-}
-
-void VerticalDock::TransformSignal(void *data, calldata_t *)
-{
-	auto *self = static_cast<VerticalDock *>(data);
-	QMetaObject::invokeMethod(self->vc, &VerticalCanvas::RequestSave, Qt::QueuedConnection);
-}
-
-void VerticalDock::QueueRefreshSources()
-{
-	if (refreshQueued) {
-		return;
-	}
-	refreshQueued = true;
-	QMetaObject::invokeMethod(
-		this,
-		[this] {
-			refreshQueued = false;
-			RefreshSources();
-		},
-		Qt::QueuedConnection);
-}
-
-void VerticalDock::RefreshSources()
-{
-	updating = true;
-	sources->clear();
-	OBSScene scene = SceneOf(vc);
-	if (scene) {
-		std::vector<OBSSceneItem> items;
-		auto cb = [](obs_scene_t *, obs_sceneitem_t *item, void *param) {
-			static_cast<std::vector<OBSSceneItem> *>(param)->emplace_back(item);
-			return true;
-		};
-		obs_scene_enum_items(scene, cb, &items);
-		/* Top of the list = top of the picture, like OBS */
-		for (auto it = items.rbegin(); it != items.rend(); ++it) {
-			obs_sceneitem_t *item = *it;
-			QListWidgetItem *li =
-				new QListWidgetItem(QString::fromUtf8(obs_source_get_name(obs_sceneitem_get_source(item))));
-			li->setFlags(li->flags() | Qt::ItemIsUserCheckable);
-			li->setCheckState(obs_sceneitem_visible(item) ? Qt::Checked : Qt::Unchecked);
-			li->setData(Qt::UserRole, QVariant::fromValue(OBSSceneItem(item)));
-			sources->addItem(li);
-			if (obs_sceneitem_selected(item)) {
-				sources->setCurrentItem(li);
-			}
+	for (int i = 0; i < list->count(); i++) {
+		QListWidgetItem *li = list->item(i);
+		OBSSource s = li->data(Qt::UserRole).value<OBSSource>();
+		if (s) {
+			li->setToolTip(LinkTooltip(s));
 		}
 	}
-	updating = false;
 }
 
-OBSSceneItem VerticalDock::SelectedItem() const
+void VerticalScenesPanel::FillSceneMenu(QMenu *menu, OBSSource current)
 {
-	QListWidgetItem *li = sources->currentItem();
-	return li ? li->data(Qt::UserRole).value<OBSSceneItem>() : nullptr;
-}
-
-void VerticalDock::ShowAddMenu()
-{
-	OBSScene scene = SceneOf(vc);
-	if (!scene) {
-		return;
-	}
-
-	/* Every source with a picture; they are shared with the main canvas */
-	std::vector<OBSSource> list;
-	auto cb = [](void *param, obs_source_t *source) {
-		if (obs_source_get_output_flags(source) & OBS_SOURCE_VIDEO) {
-			static_cast<std::vector<OBSSource> *>(param)->emplace_back(source);
-		}
-		return true;
-	};
-	obs_enum_sources(cb, &list);
-	std::sort(list.begin(), list.end(), [](const OBSSource &a, const OBSSource &b) {
-		return QString::fromUtf8(obs_source_get_name(a))
-			       .compare(QString::fromUtf8(obs_source_get_name(b)), Qt::CaseInsensitive) < 0;
-	});
-
-	QMenu menu(this);
-	OBSSourceAutoRelease mainScene = obs_frontend_get_current_scene();
-	if (mainScene) {
-		menu.addAction(QTStr("Vertical.CopyFromMain").arg(QString::fromUtf8(obs_source_get_name(mainScene))),
-			       this, [this, src = OBSSource(mainScene.Get())] { vc->CopyFromMainScene(src); });
-		menu.addSeparator();
-	}
-	if (list.empty()) {
-		menu.addAction(QTStr("Vertical.NoSources"))->setEnabled(false);
-	}
-	for (const OBSSource &s : list) {
-		menu.addAction(QString::fromUtf8(obs_source_get_name(s)), this, [this, s] {
-			OBSScene sc = SceneOf(vc);
-			if (!sc) {
-				return;
-			}
-			obs_sceneitem_t *item = obs_scene_add(sc, s);
-			if (item) {
-				VerticalCanvas::FitItem(item, VerticalCanvas::Fit::Width);
-				preview->setFocus();
-			}
-		});
-	}
-	menu.exec(addSource->mapToGlobal(QPoint(0, addSource->height())));
-}
-
-void VerticalDock::ShowSceneMenu()
-{
-	QMenu menu(this);
-	menu.addAction(QTStr("Vertical.RenameScene"), this, &VerticalDock::RenameScene);
+	menu->addAction(QTStr("Vertical.RenameScene"), this, &VerticalScenesPanel::RenameScene);
+	menu->addAction(QTStr("Vertical.RemoveScene"), this, &VerticalScenesPanel::RemoveScene);
 
 	/* Pick the main scenes this vertical scene goes with */
-	OBSSource current = vc->CurrentScene();
-	if (current) {
-		QMenu *links = menu.addMenu(QTStr("Vertical.LinkedScenes"));
-		QStringList mine = vc->LinkedMainScenes(current);
-		obs_frontend_source_list mainScenes = {};
-		obs_frontend_get_scenes(&mainScenes);
-		for (size_t i = 0; i < mainScenes.sources.num; i++) {
-			obs_source_t *ms = mainScenes.sources.array[i];
-			QString uuid = QString::fromUtf8(obs_source_get_uuid(ms));
-			QString name = QString::fromUtf8(obs_source_get_name(ms));
-			/* Show where else it's linked, so moving a link is obvious */
-			OBSSource other = vc->SceneForMain(ms);
-			QString label = name;
-			if (other && other.Get() != current.Get() && vc->LinkedMainScenes(other).contains(uuid)) {
-				label = QTStr("Vertical.LinkedElsewhere").arg(name, QString::fromUtf8(obs_source_get_name(other)));
-			}
-			QAction *a = links->addAction(label);
-			a->setCheckable(true);
-			a->setChecked(mine.contains(uuid));
-			OBSSource msRef = ms;
-			connect(a, &QAction::toggled, this,
-				[this, current, msRef](bool on) { vc->SetSceneLink(current, msRef, on); });
+	QMenu *links = menu->addMenu(QTStr("Vertical.LinkedScenes"));
+	QStringList mine = vc->LinkedMainScenes(current);
+	obs_frontend_source_list mainScenes = {};
+	obs_frontend_get_scenes(&mainScenes);
+	for (size_t i = 0; i < mainScenes.sources.num; i++) {
+		obs_source_t *ms = mainScenes.sources.array[i];
+		QString uuid = QString::fromUtf8(obs_source_get_uuid(ms));
+		QString name = QString::fromUtf8(obs_source_get_name(ms));
+		/* Show where else it's linked, so moving a link is obvious */
+		OBSSource other = vc->SceneForMain(ms);
+		QString label = name;
+		if (other && other.Get() != current.Get() && vc->LinkedMainScenes(other).contains(uuid)) {
+			label = QTStr("Vertical.LinkedElsewhere").arg(name, QString::fromUtf8(obs_source_get_name(other)));
 		}
-		obs_frontend_source_list_free(&mainScenes);
-		if (links->isEmpty()) {
-			links->setEnabled(false);
+		QAction *a = links->addAction(label);
+		a->setCheckable(true);
+		a->setChecked(mine.contains(uuid));
+		OBSSource msRef = ms;
+		connect(a, &QAction::toggled, this,
+			[this, current, msRef](bool on) { vc->SetSceneLink(current, msRef, on); });
+	}
+	obs_frontend_source_list_free(&mainScenes);
+	if (links->isEmpty()) {
+		links->setEnabled(false);
+	}
+}
+
+void VerticalScenesPanel::ShowContextMenu(const QPoint &pos)
+{
+	QMenu menu(this);
+	QListWidgetItem *li = list->itemAt(pos);
+	if (li) {
+		OBSSource s = li->data(Qt::UserRole).value<OBSSource>();
+		if (s) {
+			vc->SetCurrentScene(s);
+			FillSceneMenu(&menu, s);
+			menu.addSeparator();
 		}
 	}
-	menu.addSeparator();
+	menu.addAction(QTStr("Vertical.AddScene"), this, &VerticalScenesPanel::AddScene);
+	menu.exec(list->viewport()->mapToGlobal(pos));
+}
+
+void VerticalScenesPanel::ShowOptionsMenu()
+{
+	QMenu menu(this);
+	if (OBSSource current = vc->CurrentScene()) {
+		FillSceneMenu(&menu, current);
+		menu.addSeparator();
+	}
 	QAction *linked = menu.addAction(QTStr("Vertical.Linked"));
 	linked->setCheckable(true);
 	linked->setChecked(vc->Linked());
@@ -914,10 +821,11 @@ void VerticalDock::ShowSceneMenu()
 	safe->setChecked(vc->SafeZones());
 	connect(safe, &QAction::toggled, vc, &VerticalCanvas::SetSafeZones);
 	menu.setToolTipsVisible(true);
-	menu.exec(sceneMenu->mapToGlobal(QPoint(0, sceneMenu->height())));
+	QWidget *button = toolbar->widgetForAction(optionsAction);
+	menu.exec(button ? button->mapToGlobal(QPoint(0, button->height())) : QCursor::pos());
 }
 
-void VerticalDock::AddScene()
+void VerticalScenesPanel::AddScene()
 {
 	/* Default: same name as the main scene, so they're linked */
 	OBSSourceAutoRelease mainScene = obs_frontend_get_current_scene();
@@ -935,7 +843,7 @@ void VerticalDock::AddScene()
 	}
 }
 
-void VerticalDock::RemoveScene()
+void VerticalScenesPanel::RemoveScene()
 {
 	OBSSource s = vc->CurrentScene();
 	if (!s) {
@@ -953,7 +861,7 @@ void VerticalDock::RemoveScene()
 	}
 }
 
-void VerticalDock::RenameScene()
+void VerticalScenesPanel::RenameScene()
 {
 	OBSSource s = vc->CurrentScene();
 	if (!s) {
@@ -965,4 +873,311 @@ void VerticalDock::RenameScene()
 	if (ok && !vc->RenameScene(s, name)) {
 		QMessageBox::warning(this, QTStr("Vertical.RenameScene"), QTStr("Vertical.NameTaken"));
 	}
+}
+
+/* ------------------------------------------------------------------------ */
+/* Sources panel                                                            */
+
+VerticalSourcesPanel::VerticalSourcesPanel(QWidget *parent, VerticalCanvas *vc_, VerticalPreview *preview_)
+	: QWidget(parent),
+	  vc(vc_),
+	  preview(preview_)
+{
+	list = MakeList(this);
+	list->installEventFilter(this);
+	toolbar = MakeToolbar(this);
+	addAction = ToolAction(toolbar, "icon-plus", ":/res/images/plus.svg", QTStr("Vertical.AddSourceTooltip"));
+	QAction *remove = ToolAction(toolbar, "icon-trash", ":/res/images/minus.svg", QTStr("Vertical.RemoveSource"));
+	toolbar->addSeparator();
+	QAction *props = ToolAction(toolbar, "icon-gear", ":/settings/images/settings/general.svg",
+				    QTStr("Properties"));
+	toolbar->addSeparator();
+	QAction *up = ToolAction(toolbar, "icon-up", ":/res/images/up.svg", QTStr("Vertical.Order.Up"));
+	QAction *down = ToolAction(toolbar, "icon-down", ":/res/images/down.svg", QTStr("Vertical.Order.Down"));
+	MakeFrame(this, list, toolbar);
+	FinishToolbar(toolbar);
+
+	connect(addAction, &QAction::triggered, this, &VerticalSourcesPanel::ShowAddMenu);
+	connect(remove, &QAction::triggered, this, &VerticalSourcesPanel::RemoveSelected);
+	connect(props, &QAction::triggered, this, [this] {
+		if (OBSSceneItem item = SelectedItem()) {
+			obs_frontend_open_source_properties(obs_sceneitem_get_source(item));
+		}
+	});
+	connect(up, &QAction::triggered, this, [this] {
+		if (OBSSceneItem item = SelectedItem()) {
+			obs_sceneitem_set_order(item, OBS_ORDER_MOVE_UP);
+		}
+	});
+	connect(down, &QAction::triggered, this, [this] {
+		if (OBSSceneItem item = SelectedItem()) {
+			obs_sceneitem_set_order(item, OBS_ORDER_MOVE_DOWN);
+		}
+	});
+
+	connect(list, &QListWidget::currentRowChanged, this, [this](int) {
+		if (updating) {
+			return;
+		}
+		QListWidgetItem *li = list->currentItem();
+		OBSSceneItem target = li ? li->data(Qt::UserRole).value<OBSSceneItem>() : nullptr;
+		OBSScene scene = SceneOf(vc);
+		if (!scene) {
+			return;
+		}
+		auto cb = [](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+			bool want = item == static_cast<obs_sceneitem_t *>(param);
+			if (obs_sceneitem_selected(item) != want) {
+				obs_sceneitem_select(item, want);
+			}
+			return true;
+		};
+		obs_scene_enum_items(scene, cb, target.Get());
+	});
+	connect(list, &QListWidget::itemDoubleClicked, this, [](QListWidgetItem *li) {
+		OBSSceneItem item = li->data(Qt::UserRole).value<OBSSceneItem>();
+		if (item) {
+			obs_frontend_open_source_properties(obs_sceneitem_get_source(item));
+		}
+	});
+	connect(list, &QListWidget::customContextMenuRequested, this, &VerticalSourcesPanel::ShowContextMenu);
+
+	connect(preview, &VerticalPreview::SelectionChanged, this, &VerticalSourcesPanel::QueueRefresh);
+	connect(vc, &VerticalCanvas::CurrentSceneChanged, this, &VerticalSourcesPanel::ConnectScene);
+	connect(vc, &VerticalCanvas::CanvasChanged, this, &VerticalSourcesPanel::ConnectScene);
+	ConnectScene();
+}
+
+VerticalSourcesPanel::~VerticalSourcesPanel()
+{
+	sceneSignals.clear();
+}
+
+bool VerticalSourcesPanel::eventFilter(QObject *obj, QEvent *event)
+{
+	if (obj == list && event->type() == QEvent::KeyPress) {
+		auto *key = static_cast<QKeyEvent *>(event);
+		if (key->key() == Qt::Key_Delete || key->key() == Qt::Key_Backspace) {
+			RemoveSelected();
+			return true;
+		}
+	}
+	return QWidget::eventFilter(obj, event);
+}
+
+void VerticalSourcesPanel::ConnectScene()
+{
+	sceneSignals.clear();
+	OBSSource scene = vc->CurrentScene();
+	connectedScene = OBSGetWeakRef(scene);
+	if (scene) {
+		signal_handler_t *sh = obs_source_get_signal_handler(scene);
+		for (const char *sig : {"item_add", "item_remove", "reorder", "refresh", "item_visible", "item_locked",
+					"item_select", "item_deselect"}) {
+			sceneSignals.emplace_back(sh, sig, SceneSignal, this);
+		}
+		sceneSignals.emplace_back(sh, "item_transform", TransformSignal, this);
+	}
+	setEnabled(vc->GetCanvas() != nullptr);
+	Refresh();
+}
+
+void VerticalSourcesPanel::SceneSignal(void *data, calldata_t *)
+{
+	auto *self = static_cast<VerticalSourcesPanel *>(data);
+	QMetaObject::invokeMethod(self, &VerticalSourcesPanel::QueueRefresh, Qt::QueuedConnection);
+	QMetaObject::invokeMethod(self->vc, &VerticalCanvas::RequestSave, Qt::QueuedConnection);
+}
+
+void VerticalSourcesPanel::TransformSignal(void *data, calldata_t *)
+{
+	auto *self = static_cast<VerticalSourcesPanel *>(data);
+	QMetaObject::invokeMethod(self->vc, &VerticalCanvas::RequestSave, Qt::QueuedConnection);
+}
+
+void VerticalSourcesPanel::QueueRefresh()
+{
+	if (refreshQueued) {
+		return;
+	}
+	refreshQueued = true;
+	QMetaObject::invokeMethod(
+		this,
+		[this] {
+			refreshQueued = false;
+			Refresh();
+		},
+		Qt::QueuedConnection);
+}
+
+/* Same row as the main Sources list: icon, name, eye, lock */
+QWidget *VerticalSourcesPanel::MakeRow(obs_sceneitem_t *item)
+{
+	obs_source_t *source = obs_sceneitem_get_source(item);
+	QWidget *row = new QWidget();
+	row->setAttribute(Qt::WA_TranslucentBackground);
+	QHBoxLayout *layout = new QHBoxLayout(row);
+	layout->setContentsMargins(4, 0, 4, 0);
+	layout->setSpacing(6);
+
+	OBSBasic *main = OBSBasic::Get();
+	QLabel *icon = new QLabel(row);
+	icon->setPixmap(main->GetSourceIcon(obs_source_get_id(source)).pixmap(16, 16));
+	icon->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	QLabel *name = new QLabel(QString::fromUtf8(obs_source_get_name(source)), row);
+	name->setAttribute(Qt::WA_TransparentForMouseEvents);
+	if (!obs_sceneitem_visible(item)) {
+		name->setEnabled(false);
+	}
+
+	QCheckBox *vis = new QCheckBox(row);
+	idian::Utils::addClass(vis, "checkbox-icon");
+	idian::Utils::addClass(vis, "indicator-visibility");
+	vis->setChecked(obs_sceneitem_visible(item));
+	vis->setToolTip(QTStr("Basic.Main.Sources.Visibility"));
+
+	QCheckBox *lock = new QCheckBox(row);
+	idian::Utils::addClass(lock, "checkbox-icon");
+	idian::Utils::addClass(lock, "indicator-lock");
+	lock->setChecked(obs_sceneitem_locked(item));
+	lock->setToolTip(QTStr("Basic.Main.Sources.Lock"));
+
+	layout->addWidget(icon);
+	layout->addWidget(name, 1);
+	layout->addWidget(vis);
+	layout->addWidget(lock);
+
+	OBSSceneItem ref = item;
+	connect(vis, &QCheckBox::clicked, this, [ref](bool on) { obs_sceneitem_set_visible(ref, on); });
+	connect(lock, &QCheckBox::clicked, this, [ref](bool on) { obs_sceneitem_set_locked(ref, on); });
+	return row;
+}
+
+void VerticalSourcesPanel::Refresh()
+{
+	updating = true;
+	list->clear();
+	OBSScene scene = SceneOf(vc);
+	if (scene) {
+		std::vector<OBSSceneItem> items;
+		auto cb = [](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+			static_cast<std::vector<OBSSceneItem> *>(param)->emplace_back(item);
+			return true;
+		};
+		obs_scene_enum_items(scene, cb, &items);
+		/* Top of the list = top of the picture, like OBS */
+		for (auto it = items.rbegin(); it != items.rend(); ++it) {
+			obs_sceneitem_t *item = *it;
+			QListWidgetItem *li = new QListWidgetItem();
+			li->setData(Qt::UserRole, QVariant::fromValue(OBSSceneItem(item)));
+			li->setSizeHint(QSize(0, 30));
+			list->addItem(li);
+			list->setItemWidget(li, MakeRow(item));
+			if (obs_sceneitem_selected(item)) {
+				list->setCurrentItem(li);
+			}
+		}
+	}
+	updating = false;
+}
+
+OBSSceneItem VerticalSourcesPanel::SelectedItem() const
+{
+	QListWidgetItem *li = list->currentItem();
+	return li ? li->data(Qt::UserRole).value<OBSSceneItem>() : nullptr;
+}
+
+void VerticalSourcesPanel::RemoveSelected()
+{
+	OBSSceneItem item = SelectedItem();
+	if (!item) {
+		return;
+	}
+	QString name = QString::fromUtf8(obs_source_get_name(obs_sceneitem_get_source(item)));
+	auto answer = QMessageBox::question(this, QTStr("ConfirmRemove.Title"), QTStr("ConfirmRemove.Text").arg(name));
+	if (answer == QMessageBox::Yes) {
+		obs_sceneitem_remove(item);
+	}
+}
+
+void VerticalSourcesPanel::ShowAddMenu()
+{
+	OBSScene scene = SceneOf(vc);
+	if (!scene) {
+		return;
+	}
+
+	/* Every source with a picture; they are shared with the main canvas */
+	std::vector<OBSSource> sources;
+	auto cb = [](void *param, obs_source_t *source) {
+		if (obs_source_get_output_flags(source) & OBS_SOURCE_VIDEO) {
+			static_cast<std::vector<OBSSource> *>(param)->emplace_back(source);
+		}
+		return true;
+	};
+	obs_enum_sources(cb, &sources);
+	std::sort(sources.begin(), sources.end(), [](const OBSSource &a, const OBSSource &b) {
+		return QString::fromUtf8(obs_source_get_name(a))
+			       .compare(QString::fromUtf8(obs_source_get_name(b)), Qt::CaseInsensitive) < 0;
+	});
+
+	QMenu menu(this);
+	OBSSourceAutoRelease mainScene = obs_frontend_get_current_scene();
+	if (mainScene) {
+		menu.addAction(QTStr("Vertical.CopyFromMain").arg(QString::fromUtf8(obs_source_get_name(mainScene))),
+			       this, [this, src = OBSSource(mainScene.Get())] { vc->CopyFromMainScene(src); });
+		menu.addSeparator();
+	}
+	if (sources.empty()) {
+		menu.addAction(QTStr("Vertical.NoSources"))->setEnabled(false);
+	}
+	OBSBasic *main = OBSBasic::Get();
+	for (const OBSSource &s : sources) {
+		QAction *a = menu.addAction(main->GetSourceIcon(obs_source_get_id(s)),
+					    QString::fromUtf8(obs_source_get_name(s)));
+		connect(a, &QAction::triggered, this, [this, s] {
+			OBSScene sc = SceneOf(vc);
+			if (!sc) {
+				return;
+			}
+			obs_sceneitem_t *item = obs_scene_add(sc, s);
+			if (item) {
+				VerticalCanvas::FitItem(item, VerticalCanvas::Fit::Width);
+				preview->setFocus();
+			}
+		});
+	}
+	QWidget *button = toolbar->widgetForAction(addAction);
+	menu.exec(button ? button->mapToGlobal(QPoint(0, button->height())) : QCursor::pos());
+}
+
+void VerticalSourcesPanel::ShowContextMenu(const QPoint &pos)
+{
+	QMenu menu(this);
+	QListWidgetItem *li = list->itemAt(pos);
+	OBSSceneItem item = li ? li->data(Qt::UserRole).value<OBSSceneItem>() : nullptr;
+	if (item) {
+		list->setCurrentItem(li);
+		obs_source_t *source = obs_sceneitem_get_source(item);
+		auto fit = [&](const QString &label, VerticalCanvas::Fit mode) {
+			menu.addAction(label, this, [item, mode] { VerticalCanvas::FitItem(item, mode); });
+		};
+		fit(QTStr("Vertical.Fit.Width"), VerticalCanvas::Fit::Width);
+		fit(QTStr("Vertical.Fit.Inside"), VerticalCanvas::Fit::Inside);
+		fit(QTStr("Vertical.Fit.Fill"), VerticalCanvas::Fit::Fill);
+		fit(QTStr("Vertical.Fit.Center"), VerticalCanvas::Fit::Center);
+		fit(QTStr("Vertical.Fit.Reset"), VerticalCanvas::Fit::Reset);
+		menu.addSeparator();
+		menu.addAction(QTStr("Properties"), this,
+			       [source] { obs_frontend_open_source_properties(source); });
+		menu.addAction(QTStr("Filters"), this,
+			       [source] { obs_frontend_open_source_filters(source); });
+		menu.addSeparator();
+		menu.addAction(QTStr("Vertical.RemoveSource"), this, &VerticalSourcesPanel::RemoveSelected);
+		menu.addSeparator();
+	}
+	menu.addAction(QTStr("Vertical.AddSourceMenu"), this,
+		       [this] { QTimer::singleShot(0, this, &VerticalSourcesPanel::ShowAddMenu); });
+	menu.exec(list->viewport()->mapToGlobal(pos));
 }

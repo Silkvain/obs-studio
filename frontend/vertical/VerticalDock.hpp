@@ -1,5 +1,6 @@
 /******************************************************************************
-    Siegfried: Vertical canvas dock (preview, scenes, sources).
+    Siegfried: Vertical canvas UI: the preview that sits beside the main
+    preview, and the scenes/sources panels shown in the Vertical tabs.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,10 +17,11 @@
 
 #include <QWidget>
 
-class QComboBox;
+class QAction;
 class QLabel;
 class QListWidget;
-class QToolButton;
+class QMenu;
+class QToolBar;
 class VerticalCanvas;
 
 /* Live, editable preview of the vertical canvas */
@@ -32,6 +34,7 @@ public:
 
 signals:
 	void SelectionChanged();
+	void Activated();
 
 protected:
 	void mousePressEvent(QMouseEvent *event) override;
@@ -65,38 +68,82 @@ private:
 	float startDistance = 1.0f;
 };
 
-class VerticalDock : public QWidget {
+/* The preview with a small title line, placed beside the main preview */
+class VerticalPane : public QWidget {
 	Q_OBJECT
 
 public:
-	VerticalDock(QWidget *parent, VerticalCanvas *vc);
-	~VerticalDock() override;
+	VerticalPane(QWidget *parent, VerticalCanvas *vc);
+
+	VerticalPreview *Preview() const { return preview; }
 
 private slots:
-	void RefreshScenes();
-	void RefreshSources();
-	void QueueRefreshSources();
+	void UpdateTitle();
+
+private:
+	VerticalCanvas *vc;
+	VerticalPreview *preview;
+	QLabel *title;
+};
+
+/* Vertical scenes, shown in the Scenes dock's Vertical tab */
+class VerticalScenesPanel : public QWidget {
+	Q_OBJECT
+
+public:
+	VerticalScenesPanel(QWidget *parent, VerticalCanvas *vc);
+
+private slots:
+	void Refresh();
+	void UpdateTooltips();
+
+private:
+	QString LinkTooltip(obs_source_t *scene) const;
+	void ShowContextMenu(const QPoint &pos);
+	void ShowOptionsMenu();
+	void FillSceneMenu(QMenu *menu, OBSSource scene);
+	void AddScene();
+	void RemoveScene();
+	void RenameScene();
+
+	VerticalCanvas *vc;
+	QListWidget *list;
+	QToolBar *toolbar;
+	QAction *optionsAction;
+	bool updating = false;
+};
+
+/* Sources of the current vertical scene, shown in the Sources dock's Vertical tab */
+class VerticalSourcesPanel : public QWidget {
+	Q_OBJECT
+
+public:
+	VerticalSourcesPanel(QWidget *parent, VerticalCanvas *vc, VerticalPreview *preview);
+	~VerticalSourcesPanel() override;
+
+protected:
+	bool eventFilter(QObject *obj, QEvent *event) override;
+
+private slots:
+	void Refresh();
+	void QueueRefresh();
 	void ConnectScene();
-	void UpdateLinkTooltip();
 
 private:
 	static void SceneSignal(void *data, calldata_t *cd);
 	static void TransformSignal(void *data, calldata_t *cd);
 
 	OBSSceneItem SelectedItem() const;
+	QWidget *MakeRow(obs_sceneitem_t *item);
 	void ShowAddMenu();
-	void ShowSceneMenu();
-	void AddScene();
-	void RemoveScene();
-	void RenameScene();
+	void ShowContextMenu(const QPoint &pos);
+	void RemoveSelected();
 
 	VerticalCanvas *vc;
 	VerticalPreview *preview;
-	QComboBox *scenes;
-	QListWidget *sources;
-	QLabel *sizeLabel;
-	QToolButton *addSource;
-	QToolButton *sceneMenu;
+	QListWidget *list;
+	QToolBar *toolbar;
+	QAction *addAction;
 
 	OBSWeakSource connectedScene;
 	std::vector<OBSSignal> sceneSignals;
