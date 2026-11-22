@@ -527,22 +527,6 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 	if (platform_theme && strcmp(platform_theme, "qt5ct") == 0) {
 		unsetenv("QT_QPA_PLATFORMTHEME");
 	}
-
-	/* Siegfried: on Wayland, Qt can't move a dragged panel with the mouse
-	 * or let it dock back (QTBUG-87332). Under XWayland panels drag
-	 * normally, and screen capture still works through PipeWire.
-	 * Hyprland setups often export QT_QPA_PLATFORM=wayland for every app,
-	 * so that is overridden too. SIEGFRIED_NATIVE_WAYLAND=1 keeps native
-	 * Wayland. */
-	const char *wayland_display = getenv("WAYLAND_DISPLAY");
-	const char *x_display = getenv("DISPLAY");
-	const char *native_wayland = getenv("SIEGFRIED_NATIVE_WAYLAND");
-	const char *qpa = getenv("QT_QPA_PLATFORM");
-	bool qpa_unset_or_wayland = !qpa || !*qpa || strncmp(qpa, "wayland", 7) == 0;
-	if (qpa_unset_or_wayland && wayland_display && *wayland_display && x_display && *x_display &&
-	    !(native_wayland && strcmp(native_wayland, "1") == 0)) {
-		setenv("QT_QPA_PLATFORM", "xcb", 1);
-	}
 #endif
 
 	/* NOTE: This disables an optimisation in Qt that attempts to determine if

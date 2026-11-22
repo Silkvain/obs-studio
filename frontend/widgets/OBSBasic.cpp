@@ -30,6 +30,7 @@
 #include "multichat/ChatOverlaySource.hpp"
 #include "vertical/VerticalCanvas.hpp"
 #include "vertical/VerticalDock.hpp"
+#include "docks/DockDrag.hpp"
 #include "plugin-manager/PluginManager.hpp"
 
 #include <obs-module.h>
@@ -287,6 +288,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	splitDockWidget(multichatDock, activityDock, Qt::Vertical);
 
 	startingDockLayout = saveState();
+
+	/* Siegfried: panels follow the mouse when dragged on Wayland */
+	DockDrag::Install(this);
 
 	statsDock = new OBSDock();
 	statsDock->setObjectName(QStringLiteral("statsDock"));
