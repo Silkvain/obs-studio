@@ -14,6 +14,8 @@ target_include_directories(obs-studio PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/multi
 target_sources(
   obs-studio
   PRIVATE
+    multichat/ActivityDock.cpp
+    multichat/ActivityDock.hpp
     multichat/ChatConnector.cpp
     multichat/ChatConnector.hpp
     multichat/ChatSocket.cpp

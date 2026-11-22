@@ -90,6 +90,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	chatTargetsDock->setVisible(true);
 	multichatDock->setVisible(true);
 	verticalDock->setVisible(true);
+	activityDock->setVisible(true);
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
 
@@ -129,6 +130,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	statsDock->setFeatures(features);
 	multichatDock->setFeatures(features);
 	verticalDock->setFeatures(features);
+	activityDock->setFeatures(features);
 	chatTargetsDock->setFeatures(lock ? QDockWidget::NoDockWidgetFeatures : QDockWidget::DockWidgetMovable);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--) {

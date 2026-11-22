@@ -37,6 +37,8 @@ public:
 	void Unban(const ChatUser &user) override;
 
 private:
+	void EmitYouTubeEvent(const QJsonObject &item, const QString &type, const QJsonObject &sn,
+			      const QJsonObject &author);
 	void FindBroadcast();
 	void Poll();
 	void Api(const QByteArray &verb, const QString &pathAndQuery, const QJsonObject &body,

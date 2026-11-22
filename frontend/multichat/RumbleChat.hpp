@@ -46,4 +46,6 @@ private:
 	bool running = false;
 	bool primed = false;
 	QSet<QString> seen;
+	QSet<QString> seenEvents;
+	bool eventsPrimed = false;
 };

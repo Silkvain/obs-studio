@@ -11,6 +11,7 @@
 
 #include "multichat-config.h"
 
+#include <algorithm>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QJsonDocument>
@@ -276,4 +277,80 @@ bool LoopbackOAuth::Listen(const QString &host, quint16 port, const QString &pat
 void LoopbackOAuth::Open(const QUrl &authorizeUrl)
 {
 	QDesktopServices::openUrl(authorizeUrl);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Stream events                                                            */
+
+namespace {
+struct EventInfo {
+	StreamEventType type;
+	const char *key;
+	const char *name;
+};
+const EventInfo kEventInfo[kStreamEventTypeCount] = {
+	{StreamEventType::Follow, "follow", "Follow"},
+	{StreamEventType::Subscribe, "subscribe", "Subscription"},
+	{StreamEventType::Resubscribe, "resubscribe", "Resub"},
+	{StreamEventType::GiftSub, "gift_sub", "Gifted subs"},
+	{StreamEventType::Bits, "bits", "Bits"},
+	{StreamEventType::Donation, "donation", "Donation"},
+	{StreamEventType::Raid, "raid", "Raid"},
+	{StreamEventType::Host, "host", "Host"},
+	{StreamEventType::SuperChat, "superchat", "Super Chat"},
+	{StreamEventType::Membership, "membership", "Membership"},
+	{StreamEventType::Rant, "rant", "Rant"},
+};
+} // namespace
+
+const char *StreamEventKey(StreamEventType t)
+{
+	return kEventInfo[int(t)].key;
+}
+
+QString StreamEventName(StreamEventType t)
+{
+	return QString::fromLatin1(kEventInfo[int(t)].name);
+}
+
+bool StreamEventFromKey(const QString &key, StreamEventType &out)
+{
+	for (const EventInfo &i : kEventInfo) {
+		if (key == QLatin1String(i.key)) {
+			out = i.type;
+			return true;
+		}
+	}
+	return false;
+}
+
+QString StreamEvent::AmountText() const
+{
+	auto money = [this]() {
+		QString cur = currency.toUpper();
+		QString sym = cur == "USD"   ? QStringLiteral("$")
+			      : cur == "GBP" ? QStringLiteral("£")
+			      : cur == "EUR" ? QStringLiteral("€")
+					     : QString();
+		QString n = QString::number(amount, 'f', 2);
+		return sym.isEmpty() ? QStringLiteral("%1 %2").arg(n, cur).trimmed() : sym + n;
+	};
+	switch (type) {
+	case StreamEventType::Bits:
+		return QStringLiteral("%1 %2").arg(qint64(amount)).arg(currency.isEmpty() ? QStringLiteral("bits")
+											   : currency.toLower());
+	case StreamEventType::Donation:
+	case StreamEventType::SuperChat:
+	case StreamEventType::Rant:
+		return money();
+	case StreamEventType::GiftSub:
+		return QStringLiteral("x%1").arg(std::max(1, count));
+	case StreamEventType::Raid:
+	case StreamEventType::Host:
+		return count > 0 ? QStringLiteral("%1 viewers").arg(count) : QString();
+	case StreamEventType::Resubscribe:
+		return months > 0 ? QStringLiteral("%1 months").arg(months) : QString();
+	default:
+		return tier == QLatin1String("Prime") ? QStringLiteral("Prime") : QString();
+	}
 }

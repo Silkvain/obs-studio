@@ -28,7 +28,26 @@
 #include "moc_TwitchChat.cpp"
 
 namespace {
-constexpr const char *kScopes = "chat:read chat:edit moderator:manage:banned_users";
+/* moderator:read:followers: follow alerts (EventSub). Subs, gifts, raids
+ * and bits arrive over chat and need nothing extra. */
+constexpr const char *kScopes = "chat:read chat:edit moderator:manage:banned_users moderator:read:followers";
+constexpr const char *kFollowScope = "moderator:read:followers";
+
+QString EventSubUrl()
+{
+	return qEnvironmentVariableIsSet("MULTICHAT_TWITCH_EVENTSUB") ? qEnvironmentVariable("MULTICHAT_TWITCH_EVENTSUB")
+								      : QStringLiteral("wss://eventsub.wss.twitch.tv/ws");
+}
+
+QString TierFromPlan(const QString &plan)
+{
+	if (plan == QLatin1String("Prime")) {
+		return plan;
+	}
+	bool ok = false;
+	int n = plan.toInt(&ok);
+	return ok ? QString::number(std::max(1, n / 1000)) : QString();
+}
 
 QString IrcUrl()
 {
@@ -112,12 +131,14 @@ void TwitchChat::Start()
 		ScheduleReconnect();
 	});
 	ws->open(QUrl(IrcUrl()));
+	StartEventSub(EventSubUrl());
 }
 
 void TwitchChat::Stop()
 {
 	running = false;
 	reconnectTimer.stop();
+	StopEventSub();
 	if (ws) {
 		ws->disconnect(this);
 		ws->close();
@@ -240,15 +261,175 @@ void TwitchChat::HandleLine(const QString &raw)
 		}
 		if (tags.contains("bits")) {
 			msg.highlight = tr("%1 bits").arg(tags.value("bits"));
+			StreamEvent ev;
+			ev.platform = ChatPlatform::Twitch;
+			ev.type = StreamEventType::Bits;
+			ev.id = msg.id;
+			ev.user = msg.user;
+			ev.amount = tags.value("bits").toDouble();
+			ev.message = msg.text;
+			ev.time = msg.time;
+			emit EventReceived(ev);
 		}
 
 		emit MessageReceived(msg);
+	} else if (cmd == "USERNOTICE") {
+		HandleUserNotice(tags, trailing);
 	} else if (cmd == "CLEARCHAT" && !trailing.isEmpty()) {
 		QString dur = tags.value("ban-duration");
 		EmitNotice(dur.isEmpty() ? tr("%1 was banned").arg(trailing)
 					 : tr("%1 was timed out for %2s").arg(trailing, dur));
 	} else if (cmd == "RECONNECT") {
 		Start();
+	}
+}
+
+/* Subs, resubs, gifted subs and raids arrive as USERNOTICE in chat */
+void TwitchChat::HandleUserNotice(const QHash<QString, QString> &tags, const QString &text)
+{
+	QString kind = tags.value("msg-id");
+	StreamEvent ev;
+	ev.platform = ChatPlatform::Twitch;
+	ev.id = tags.value("id");
+	ev.user.platform = ChatPlatform::Twitch;
+	ev.user.id = tags.value("user-id");
+	ev.user.login = tags.value("login");
+	ev.user.displayName = tags.value("display-name", ev.user.login);
+	ev.user.color = tags.value("color");
+	ev.message = text;
+	ev.tier = TierFromPlan(tags.value("msg-param-sub-plan"));
+	bool okTs = false;
+	qint64 ts = tags.value("tmi-sent-ts").toLongLong(&okTs);
+	if (okTs) {
+		ev.time = QDateTime::fromMSecsSinceEpoch(ts);
+	}
+
+	if (kind == "sub") {
+		ev.type = StreamEventType::Subscribe;
+	} else if (kind == "resub") {
+		ev.type = StreamEventType::Resubscribe;
+		ev.months = tags.value("msg-param-cumulative-months").toInt();
+	} else if (kind == "submysterygift") {
+		/* "X is gifting 5 subs": one alert, not five */
+		ev.type = StreamEventType::GiftSub;
+		ev.count = std::max(1, tags.value("msg-param-mass-gift-count").toInt());
+		QString group = tags.value("msg-param-community-gift-id");
+		if (!group.isEmpty()) {
+			giftGroups.insert(group);
+		}
+	} else if (kind == "subgift") {
+		QString group = tags.value("msg-param-community-gift-id");
+		if (!group.isEmpty() && giftGroups.contains(group)) {
+			return; /* part of a mystery gift already announced */
+		}
+		ev.type = StreamEventType::GiftSub;
+		ev.count = 1;
+		ev.message = tr("to %1").arg(tags.value("msg-param-recipient-display-name"));
+	} else if (kind == "raid") {
+		ev.type = StreamEventType::Raid;
+		ev.count = tags.value("msg-param-viewerCount").toInt();
+		QString name = tags.value("msg-param-displayName");
+		if (!name.isEmpty()) {
+			ev.user.displayName = name;
+		}
+	} else if (kind == "giftpaidupgrade" || kind == "anongiftpaidupgrade" || kind == "primepaidupgrade") {
+		ev.type = StreamEventType::Subscribe;
+	} else {
+		return;
+	}
+	if (ev.user.displayName.isEmpty()) {
+		ev.user.displayName = ev.user.login.isEmpty() ? tr("Anonymous") : ev.user.login;
+	}
+	emit EventReceived(ev);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Follows: EventSub over WebSocket (needs moderator:read:followers)        */
+
+void TwitchChat::StartEventSub(const QString &url)
+{
+	StopEventSub();
+	if (!LoggedIn()) {
+		return; /* follows need the streamer's login */
+	}
+	eventWs = new ChatSocket(this);
+	connect(eventWs, &ChatSocket::textMessageReceived, this, &TwitchChat::OnEventSub);
+	connect(eventWs, &ChatSocket::disconnected, this, [this] {
+		if (running) {
+			QTimer::singleShot(10000, this, [this] {
+				if (running && !eventWs) {
+					StartEventSub(EventSubUrl());
+				}
+			});
+		}
+		if (eventWs) {
+			eventWs->deleteLater();
+			eventWs = nullptr;
+		}
+	});
+	eventWs->open(QUrl(url));
+}
+
+void TwitchChat::StopEventSub()
+{
+	if (eventWs) {
+		eventWs->disconnect(this);
+		eventWs->close();
+		eventWs->deleteLater();
+		eventWs = nullptr;
+	}
+}
+
+void TwitchChat::OnEventSub(const QString &frame)
+{
+	QJsonObject root = QJsonDocument::fromJson(frame.toUtf8()).object();
+	QJsonObject meta = root.value("metadata").toObject();
+	QJsonObject payload = root.value("payload").toObject();
+	QString type = meta.value("message_type").toString();
+
+	if (type == "session_welcome") {
+		QString session = payload.value("session").toObject().value("id").toString();
+		WithBroadcasterId([this, session](const QString &bid) {
+			QJsonObject body{
+				{"type", "channel.follow"},
+				{"version", "2"},
+				{"condition", QJsonObject{{"broadcaster_user_id", bid}, {"moderator_user_id", Str("user_id")}}},
+				{"transport", QJsonObject{{"method", "websocket"}, {"session_id", session}}},
+			};
+			Helix("POST", QStringLiteral("/eventsub/subscriptions"), body, [this](int status, const QJsonObject &) {
+				if (status == 401 || status == 403) {
+					EmitNotice(tr("Follow alerts need one more Twitch permission (%1): click Connect for "
+						      "Twitch again.")
+							   .arg(QString::fromLatin1(kFollowScope)),
+						   true);
+				} else if (status >= 300) {
+					EmitNotice(tr("Couldn't turn on Twitch follow alerts (error %1)").arg(status), true);
+				}
+			});
+		});
+	} else if (type == "session_reconnect") {
+		QString next = payload.value("session").toObject().value("reconnect_url").toString();
+		if (!next.isEmpty()) {
+			StartEventSub(next);
+		}
+	} else if (type == "notification") {
+		QString subType = payload.value("subscription").toObject().value("type").toString();
+		QJsonObject e = payload.value("event").toObject();
+		if (subType == "channel.follow") {
+			StreamEvent ev;
+			ev.platform = ChatPlatform::Twitch;
+			ev.type = StreamEventType::Follow;
+			ev.id = meta.value("message_id").toString();
+			ev.user.platform = ChatPlatform::Twitch;
+			ev.user.id = e.value("user_id").toString();
+			ev.user.login = e.value("user_login").toString();
+			ev.user.displayName = e.value("user_name").toString(ev.user.login);
+			QDateTime t = QDateTime::fromString(e.value("followed_at").toString(), Qt::ISODateWithMs);
+			if (t.isValid()) {
+				ev.time = t.toLocalTime();
+			}
+			emit EventReceived(ev);
+		}
 	}
 }
 

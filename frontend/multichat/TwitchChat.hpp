@@ -14,7 +14,9 @@
 
 #include "ChatConnector.hpp"
 
+#include <QHash>
 #include <QPointer>
+#include <QSet>
 #include <QTimer>
 
 class ChatSocket;
@@ -41,6 +43,10 @@ private:
 	void OnConnected();
 	void OnText(const QString &frame);
 	void HandleLine(const QString &line);
+	void HandleUserNotice(const QHash<QString, QString> &tags, const QString &text);
+	void StartEventSub(const QString &url);
+	void StopEventSub();
+	void OnEventSub(const QString &frame);
 	void ScheduleReconnect();
 	void RefreshToken(std::function<void(bool)> done);
 	void Helix(const QByteArray &verb, const QString &path, const QJsonObject &body,
@@ -52,6 +58,8 @@ private:
 	QString Channel() const { return Str("channel").trimmed().toLower().remove('#'); }
 
 	QPointer<ChatSocket> ws;
+	QPointer<ChatSocket> eventWs;
+	QSet<QString> giftGroups;
 	QTimer reconnectTimer;
 	QTimer devicePollTimer;
 	QPointer<QDialog> deviceDialog;

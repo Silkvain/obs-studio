@@ -69,6 +69,41 @@ void RumbleChat::Poll()
 				return;
 			}
 
+			/* Followers and subscribers are listed at the top level, live or
+			 * not. First poll only remembers them (no alerts for old ones). */
+			auto scan = [this](const QJsonArray &list, const char *whenKey, StreamEventType type) {
+				for (const QJsonValue &v : list) {
+					QJsonObject o = v.toObject();
+					QString user = o.value("username").toString();
+					if (user.isEmpty()) {
+						user = o.value("user").toString();
+					}
+					QString key = QString::fromLatin1(StreamEventKey(type)) + ':' + user + ':' +
+						      o.value(whenKey).toString();
+					if (user.isEmpty() || seenEvents.contains(key)) {
+						continue;
+					}
+					seenEvents.insert(key);
+					if (!eventsPrimed) {
+						continue;
+					}
+					StreamEvent ev;
+					ev.platform = ChatPlatform::Rumble;
+					ev.type = type;
+					ev.id = key;
+					ev.user.platform = ChatPlatform::Rumble;
+					ev.user.id = user;
+					ev.user.login = user;
+					ev.user.displayName = user;
+					emit EventReceived(ev);
+				}
+			};
+			scan(obj.value("followers").toObject().value("recent_followers").toArray(), "followed_on",
+			     StreamEventType::Follow);
+			scan(obj.value("subscribers").toObject().value("recent_subscribers").toArray(), "subscribed_on",
+			     StreamEventType::Subscribe);
+			eventsPrimed = true;
+
 			QJsonArray streams = obj.value("livestreams").toArray();
 			QJsonObject live;
 			for (const QJsonValue &v : streams) {
@@ -121,6 +156,18 @@ void RumbleChat::Poll()
 				if (it.rant) {
 					msg.highlight =
 						tr("$%1 Rant").arg(it.o.value("amount_dollars").toVariant().toString());
+					if (primed) {
+						StreamEvent ev;
+						ev.platform = ChatPlatform::Rumble;
+						ev.type = StreamEventType::Rant;
+						ev.id = QStringLiteral("rant:") + key;
+						ev.user = msg.user;
+						ev.amount = it.o.value("amount_dollars").toVariant().toDouble();
+						ev.currency = QStringLiteral("USD");
+						ev.message = text;
+						ev.time = msg.time;
+						emit EventReceived(ev);
+					}
 				}
 				fresh.append(msg);
 			}

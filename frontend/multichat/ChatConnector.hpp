@@ -58,6 +58,45 @@ struct ChatMessage {
 	QString highlight; /* e.g. "$5.00 Rant" */
 };
 
+/* Something that happened on a platform: follows, subs, bits, raids...
+ * The Activity panel and the Alerts source both read these. */
+enum class StreamEventType {
+	Follow,
+	Subscribe,
+	Resubscribe,
+	GiftSub,    /* count = number of subs gifted */
+	Bits,       /* amount = bits */
+	Donation,   /* amount + currency */
+	Raid,       /* count = viewers */
+	Host,       /* count = viewers */
+	SuperChat,  /* YouTube Super Chat / Super Sticker: amount + currency */
+	Membership, /* YouTube / Kick-style membership */
+	Rant,       /* Rumble Rant: amount + currency */
+};
+constexpr int kStreamEventTypeCount = 11;
+
+const char *StreamEventKey(StreamEventType t); /* "follow", stable, used in config */
+QString StreamEventName(StreamEventType t);    /* "Follow" */
+bool StreamEventFromKey(const QString &key, StreamEventType &out);
+
+struct StreamEvent {
+	ChatPlatform platform = ChatPlatform::Twitch;
+	StreamEventType type = StreamEventType::Follow;
+	QString id; /* for de-duplication */
+	ChatUser user;
+	double amount = 0;
+	QString currency; /* "USD", or empty */
+	int count = 0;    /* gifted subs, raid viewers */
+	int months = 0;   /* resub months */
+	QString tier;     /* "1", "2", "3", "Prime" */
+	QString message;  /* resub/cheer/donation message */
+	QDateTime time = QDateTime::currentDateTime();
+	bool test = false;
+
+	/* "500 bits", "$5.00", "x5", "12 viewers" for display */
+	QString AmountText() const;
+};
+
 enum class ChatState {
 	Disabled,
 	Connecting,
@@ -103,6 +142,7 @@ public:
 
 signals:
 	void MessageReceived(const ChatMessage &msg);
+	void EventReceived(const StreamEvent &event);
 	void Notice(ChatPlatform platform, const QString &text, bool error);
 	void StateChanged(ChatPlatform platform);
 	void ConfigChanged();

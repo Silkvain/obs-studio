@@ -96,7 +96,7 @@ QString AlertEvent(const QString &entry)
 		{"tip", "donation"},           {"raid", "raid"},              {"host", "host"},
 		{"super ?chat", "superchat"},  {"super ?sticker", "superchat"}, {"star", "stars"},
 		{"supporter", "fb_support"},   {"like", "fb_like"},           {"share", "fb_share"},
-		{"merch", "merch"},            {"charity", "charity"},
+		{"merch", "merch"},            {"charity", "charity"},        {"rant", "rant"},
 	};
 	for (const Rule &r : rules) {
 		if (n.contains(QRegularExpression(QString::fromLatin1(r.pattern)))) {
@@ -764,6 +764,7 @@ QString AssetImport::AlertEventTitle(const QString &event)
 		{"fb_share", "Share (Facebook)"},
 		{"merch", "Merch"},
 		{"charity", "Charity"},
+		{"rant", "Rant (Rumble)"},
 	};
 	return titles.value(event, event);
 }

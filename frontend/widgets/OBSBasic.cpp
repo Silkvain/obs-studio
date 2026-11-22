@@ -25,6 +25,8 @@
 #include "OBSBasicStats.hpp"
 #include "docks/MultistreamDock.hpp"
 #include "multichat/MultichatDock.hpp"
+#include "alerts/AlertsSource.hpp"
+#include "multichat/ActivityDock.hpp"
 #include "multichat/ChatOverlaySource.hpp"
 #include "vertical/VerticalCanvas.hpp"
 #include "vertical/VerticalDock.hpp"
@@ -285,6 +287,15 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	splitDockWidget(verticalDock, multichatDock, Qt::Horizontal);
 	resizeDocks({verticalDock}, {std::min(width() * 18 / 100, 300)}, Qt::Horizontal);
 
+	/* Activity (follows, subs, raids...), under the chat */
+	activityDock = new OBSDock();
+	activityDock->setObjectName(QStringLiteral("activityDock"));
+	activityDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
+				  QDockWidget::DockWidgetFloatable);
+	activityDock->setWindowTitle(QTStr("Activity.DockTitle"));
+	addDockWidget(Qt::RightDockWidgetArea, activityDock);
+	splitDockWidget(multichatDock, activityDock, Qt::Vertical);
+
 	startingDockLayout = saveState();
 
 	statsDock = new OBSDock();
@@ -460,6 +471,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(chatTargetsDock);
 	SETUP_DOCK(multichatDock);
 	SETUP_DOCK(verticalDock);
+	SETUP_DOCK(activityDock);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -972,6 +984,7 @@ void OBSBasic::OBSInit()
 
 	/* Siegfried: "Chat (all platforms)" source, before any collection loads */
 	ChatOverlay::Register();
+	Alerts::Register();
 
 #ifdef BROWSER_AVAILABLE
 	cef = obs_browser_init_panel();
@@ -1155,6 +1168,8 @@ void OBSBasic::OBSInit()
 	/* setup multichat */
 	chatHub = new ChatHub(this);
 	ChatOverlay::AttachHub(chatHub);
+	Alerts::AttachHub(chatHub);
+	activityDock->setWidget(new ActivityDock(activityDock, chatHub));
 	multichatDock->setWidget(new MultichatDock(multichatDock, chatHub));
 	chatTargetsDock->setWidget(new ChatTargetsPanel(chatTargetsDock, chatHub));
 	chatHub->StartAll();
@@ -1220,6 +1235,15 @@ void OBSBasic::OBSInit()
 	if (!config_get_bool(App()->GetUserConfig(), "Multichat", "TargetsIntroduced")) {
 		chatTargetsDock->setVisible(true);
 		config_set_bool(App()->GetUserConfig(), "Multichat", "TargetsIntroduced", true);
+	}
+	if (!config_get_bool(App()->GetUserConfig(), "Activity", "DockIntroduced")) {
+		activityDock->setFloating(false);
+		addDockWidget(Qt::RightDockWidgetArea, activityDock);
+		if (multichatDock && !multichatDock->isFloating() && multichatDock->isVisible()) {
+			splitDockWidget(multichatDock, activityDock, Qt::Vertical);
+		}
+		activityDock->setVisible(true);
+		config_set_bool(App()->GetUserConfig(), "Activity", "DockIntroduced", true);
 	}
 	if (!config_get_bool(App()->GetUserConfig(), "Vertical", "DockIntroduced")) {
 		/* Saved layouts predate this dock: put it between the preview and chat */

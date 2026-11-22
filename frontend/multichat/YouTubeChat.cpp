@@ -149,6 +149,11 @@ void YouTubeChat::Poll()
 			QJsonObject sn = item.value("snippet").toObject();
 			QJsonObject author = item.value("authorDetails").toObject();
 			QString type = sn.value("type").toString();
+			/* The first page is backlog from before we connected: show it
+			 * in chat but don't fire alerts for it */
+			if (!first) {
+				EmitYouTubeEvent(item, type, sn, author);
+			}
 			if (type != "textMessageEvent" && type != "superChatEvent" && type != "superStickerEvent") {
 				continue;
 			}
@@ -180,6 +185,47 @@ void YouTubeChat::Poll()
 		pageToken = obj.value("nextPageToken").toString();
 		pollTimer.start(std::max(kMinPollMs, obj.value("pollingIntervalMillis").toInt()));
 	});
+}
+
+/* Super Chats, Super Stickers and memberships. (YouTube doesn't tell any
+ * app about new channel subscribers live.) */
+void YouTubeChat::EmitYouTubeEvent(const QJsonObject &item, const QString &type, const QJsonObject &sn,
+				   const QJsonObject &author)
+{
+	StreamEvent ev;
+	ev.platform = ChatPlatform::YouTube;
+	ev.id = item.value("id").toString();
+	ev.user.platform = ChatPlatform::YouTube;
+	ev.user.id = author.value("channelId").toString();
+	ev.user.displayName = author.value("displayName").toString();
+	ev.user.login = ev.user.displayName;
+	QDateTime t = QDateTime::fromString(sn.value("publishedAt").toString(), Qt::ISODate);
+	if (t.isValid()) {
+		ev.time = t.toLocalTime();
+	}
+
+	if (type == "superChatEvent" || type == "superStickerEvent") {
+		QJsonObject d = sn.value(type == "superChatEvent" ? "superChatDetails" : "superStickerDetails").toObject();
+		ev.type = StreamEventType::SuperChat;
+		ev.amount = d.value("amountMicros").toVariant().toDouble() / 1000000.0;
+		ev.currency = d.value("currency").toString();
+		ev.message = d.value("userComment").toString();
+	} else if (type == "newSponsorEvent") {
+		ev.type = StreamEventType::Membership;
+		ev.tier = sn.value("newSponsorDetails").toObject().value("memberLevelName").toString();
+	} else if (type == "memberMilestoneChatEvent") {
+		QJsonObject d = sn.value("memberMilestoneChatDetails").toObject();
+		ev.type = StreamEventType::Membership;
+		ev.months = d.value("memberMonth").toInt();
+		ev.tier = d.value("memberLevelName").toString();
+		ev.message = d.value("userComment").toString();
+	} else if (type == "membershipGiftingEvent") {
+		ev.type = StreamEventType::GiftSub;
+		ev.count = sn.value("membershipGiftingDetails").toObject().value("giftMembershipsCount").toInt();
+	} else {
+		return;
+	}
+	emit EventReceived(ev);
 }
 
 void YouTubeChat::Api(const QByteArray &verb, const QString &pathAndQuery, const QJsonObject &body,

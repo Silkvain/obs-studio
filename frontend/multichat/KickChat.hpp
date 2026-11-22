@@ -44,6 +44,7 @@ private:
 	void LookupChatroom();
 	void ConnectPusher(const QString &chatroomId);
 	void OnPusher(const QString &frame);
+	void HandleKickEvent(const QString &name, const QJsonObject &data);
 	void ResolveBroadcaster();
 	void Api(const QByteArray &verb, const QString &path, const QJsonObject &body,
 		 std::function<void(int, const QJsonObject &)> cb, bool retried = false);

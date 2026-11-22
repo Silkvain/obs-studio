@@ -456,6 +456,7 @@ private:
 	ChatHub *chatHub = nullptr;
 	VerticalCanvas *vertical = nullptr;
 	QPointer<QDockWidget> verticalDock;
+	QPointer<QDockWidget> activityDock;
 	QByteArray startingDockLayout;
 	QStringList extraDockNames;
 	QList<std::shared_ptr<QDockWidget>> extraDocks;
@@ -1168,6 +1169,7 @@ private:
 
 public:
 	VerticalCanvas *GetVerticalCanvas() const noexcept { return vertical; }
+	ChatHub *GetChatHub() const noexcept { return chatHub; }
 
 	/* Siegfried: Scene Collection > Import Assets (overlay bundles) */
 	void ImportAssets(const QString &bundle = QString());

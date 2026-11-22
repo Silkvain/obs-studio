@@ -161,6 +161,10 @@ void KickChat::LookupChatroom()
 				return;
 			}
 			config["chatroom_id_cached"] = id;
+			qint64 channelId = obj.value("id").toVariant().toLongLong();
+			if (channelId) {
+				config["channel_id_cached"] = QString::number(channelId); /* follow events */
+			}
 			if (config.value("broadcaster_user_id").toString().isEmpty()) {
 				qint64 uid = obj.value("user_id").toVariant().toLongLong();
 				if (uid) {
@@ -202,6 +206,17 @@ void KickChat::OnPusher(const QString &frame)
 				{"data", QJsonObject{{"auth", ""},
 						     {"channel", QStringLiteral("chatrooms.%1.v2").arg(chatroomId)}}}};
 		ws->sendTextMessage(QString::fromUtf8(QJsonDocument(sub).toJson(QJsonDocument::Compact)));
+		/* Follows arrive on the channel's own public feed (both spellings
+		 * have been used by Kick's site) */
+		QString channelId = Str("channel_id_cached");
+		if (!channelId.isEmpty()) {
+			for (const QString &name : {QStringLiteral("channel.%1").arg(channelId),
+						    QStringLiteral("channel_%1").arg(channelId)}) {
+				QJsonObject s2{{"event", "pusher:subscribe"},
+					       {"data", QJsonObject{{"auth", ""}, {"channel", name}}}};
+				ws->sendTextMessage(QString::fromUtf8(QJsonDocument(s2).toJson(QJsonDocument::Compact)));
+			}
+		}
 		pingTimer.start();
 	} else if (event == "pusher_internal:subscription_succeeded") {
 		SetState(ChatState::Connected, LoggedIn() ? tr("Connected to %1").arg(Slug())
@@ -234,11 +249,77 @@ void KickChat::OnPusher(const QString &frame)
 		}
 		msg.isSelf = !Str("user_id").isEmpty() && msg.user.id == Str("user_id");
 		emit MessageReceived(msg);
-	} else if (event == "App\\Events\\UserBannedEvent") {
+	} else if (event.startsWith(QLatin1String("App\\Events\\"))) {
+		HandleKickEvent(event.mid(11), data);
+	}
+	if (event == "App\\Events\\UserBannedEvent") {
 		QString who = data.value("user").toObject().value("username").toString();
 		bool permanent = data.value("permanent").toBool();
 		EmitNotice(permanent ? tr("%1 was banned").arg(who) : tr("%1 was timed out").arg(who));
 	}
+}
+
+/* Follows, subs, gifted subs, hosts and Kicks, from Kick's public Pusher
+ * feed. Kick doesn't document these; parse defensively. */
+void KickChat::HandleKickEvent(const QString &name, const QJsonObject &data)
+{
+	StreamEvent ev;
+	ev.platform = ChatPlatform::Kick;
+	ev.user.platform = ChatPlatform::Kick;
+	auto who = [&](const QString &username) {
+		ev.user.login = username;
+		ev.user.displayName = username;
+		ev.user.id = username.toLower();
+	};
+
+	if (name == QLatin1String("FollowersUpdated")) {
+		if (!data.value("followed").toBool(true)) {
+			return; /* unfollow */
+		}
+		QString user = data.value("username").toString();
+		if (user.isEmpty()) {
+			return; /* count update only */
+		}
+		ev.type = StreamEventType::Follow;
+		who(user);
+		/* Same person following again this session = no second alert */
+		ev.id = QStringLiteral("follow-") + user.toLower();
+	} else if (name == QLatin1String("SubscriptionEvent") || name == QLatin1String("ChannelSubscriptionEvent")) {
+		QString user = data.value("username").toString();
+		if (user.isEmpty()) {
+			return;
+		}
+		ev.months = data.value("months").toInt();
+		ev.type = ev.months > 1 ? StreamEventType::Resubscribe : StreamEventType::Subscribe;
+		who(user);
+		ev.id = QStringLiteral("sub-%1-%2-%3").arg(user.toLower()).arg(ev.months).arg(QDate::currentDate().toString(Qt::ISODate));
+	} else if (name == QLatin1String("GiftedSubscriptionsEvent")) {
+		ev.type = StreamEventType::GiftSub;
+		who(data.value("gifter_username").toString(tr("Anonymous")));
+		QJsonArray to = data.value("gifted_usernames").toArray();
+		ev.count = std::max(1, int(to.size()));
+	} else if (name == QLatin1String("StreamHostEvent")) {
+		ev.type = StreamEventType::Host;
+		who(data.value("host_username").toString());
+		ev.count = data.value("number_viewers").toInt();
+		ev.message = data.value("optional_message").toString();
+	} else if (name == QLatin1String("KicksGifted")) {
+		QJsonObject sender = data.value("sender").toObject();
+		QJsonObject gift = data.value("gift").toObject();
+		ev.type = StreamEventType::Bits;
+		who(sender.value("username").toString());
+		ev.user.id = QString::number(sender.value("id").toVariant().toLongLong());
+		ev.user.color = sender.value("username_color").toString();
+		ev.amount = gift.value("amount").toDouble();
+		ev.currency = QStringLiteral("KICKS");
+		ev.message = data.value("message").toString();
+	} else {
+		return;
+	}
+	if (ev.user.displayName.isEmpty()) {
+		return;
+	}
+	emit EventReceived(ev);
 }
 
 /* ------------------------------------------------------------------------ */
