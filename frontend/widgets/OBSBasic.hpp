@@ -1168,6 +1168,9 @@ private:
 
 public:
 	VerticalCanvas *GetVerticalCanvas() const noexcept { return vertical; }
+
+	/* Siegfried: Scene Collection > Import Assets (overlay bundles) */
+	void ImportAssets(const QString &bundle = QString());
 	const std::vector<OBS::Canvas> &GetCanvases() const noexcept { return canvases; }
 
 	const OBS::Canvas &AddCanvas(const std::string &name, obs_video_info *ovi = nullptr, int flags = 0);

@@ -303,6 +303,16 @@ void OBSBasic::dropEvent(QDropEvent *event)
 #endif
 
 			QString suffixQStr = fileInfo.suffix();
+
+			/* Siegfried: an overlay bundle dropped on the window opens
+			 * Import Assets instead of becoming a source */
+			if (suffixQStr.compare("zip", Qt::CaseInsensitive) == 0 ||
+			    suffixQStr.compare("overlay", Qt::CaseInsensitive) == 0) {
+				QString bundle = file;
+				QMetaObject::invokeMethod(this, [this, bundle] { ImportAssets(bundle); }, Qt::QueuedConnection);
+				continue;
+			}
+
 			QByteArray suffixArray = suffixQStr.toUtf8();
 			const char *suffix = suffixArray.constData();
 			bool found = false;

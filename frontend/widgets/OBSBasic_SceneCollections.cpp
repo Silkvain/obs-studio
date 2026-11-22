@@ -17,6 +17,9 @@
 
 #include "OBSBasic.hpp"
 
+#include <assetimport/ImportAssetsDialog.hpp>
+#include <obs-frontend-api.h>
+
 #include <dialogs/OBSMissingFiles.hpp>
 #include <importer/OBSImporter.hpp>
 #include <models/SceneCollection.hpp>
@@ -638,6 +641,24 @@ void OBSBasic::on_actionImportSceneCollection_triggered()
 	imp.exec();
 
 	RefreshSceneCollections(true);
+}
+
+void OBSBasic::ImportAssets(const QString &bundle)
+{
+	auto taken = [this](const QString &name) {
+		return GetSceneCollectionByName(name.toStdString()).has_value();
+	};
+	ImportAssetsDialog dialog(this, taken);
+	if (!bundle.isEmpty()) {
+		dialog.LoadBundle(bundle);
+	}
+	if (dialog.exec() != QDialog::Accepted || dialog.InstalledCollection().isEmpty()) {
+		return;
+	}
+	RefreshSceneCollections(true);
+	if (dialog.SwitchAfterImport()) {
+		obs_frontend_set_current_scene_collection(dialog.InstalledCollection().toUtf8().constData());
+	}
 }
 
 void OBSBasic::on_actionExportSceneCollection_triggered()

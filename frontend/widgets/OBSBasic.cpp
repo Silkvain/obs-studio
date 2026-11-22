@@ -1154,6 +1154,11 @@ void OBSBasic::OBSInit()
 	chatTargetsDock->setWidget(new ChatTargetsPanel(chatTargetsDock, chatHub));
 	chatHub->StartAll();
 
+	/* Siegfried: Scene Collection > Import Assets... */
+	QAction *importAssets = new QAction(QTStr("ImportAssets.Menu"), this);
+	ui->sceneCollectionMenu->insertAction(ui->actionImportSceneCollection, importAssets);
+	connect(importAssets, &QAction::triggered, this, [this] { ImportAssets(); });
+
 	/* setup vertical canvas */
 	vertical = new VerticalCanvas(this);
 	verticalDock->setWidget(new VerticalDock(verticalDock, vertical));
