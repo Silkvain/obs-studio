@@ -1,7 +1,8 @@
 name: Siegfried Build
 run-name: Siegfried build ⚔️ (${{ github.ref_name }})
 
-# Builds Siegfried for Linux (Arch/CachyOS package) on every push to the
+# Builds Siegfried for Linux (Arch/CachyOS package, Ubuntu 24.04 .debs for
+# amd64 and arm64) on every push to the
 # "multistream" branch and publishes it as a GitHub Release.
 # Windows (installer + portable zip) is only built on request: Actions tab ▸
 # Siegfried Build ▸ Run workflow ▸ tick "Also build Windows".
@@ -185,9 +186,148 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  linux-ubuntu:
+    name: Linux (Ubuntu 24.04 ${{ matrix.arch }}) 🐧
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - name: Install build dependencies 📦
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config extra-cmake-modules git dpkg-dev \
+            libglib2.0-dev libcurl4-openssl-dev \
+            libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev \
+            libswresample-dev libswscale-dev libjansson-dev libx11-xcb-dev libgles2-mesa-dev \
+            libwayland-dev libpipewire-0.3-dev libpulse-dev libx264-dev libgl1-mesa-dev \
+            uthash-dev libsimde-dev libluajit-5.1-dev python3-dev swig \
+            libx11-dev libxcb-randr0-dev libxcb-shm0-dev libxcb-xinerama0-dev libxcb-composite0-dev \
+            libxinerama-dev libxcb1-dev libxcb-xfixes0-dev libxss-dev libglvnd-dev libxkbcommon-dev \
+            libxcomposite-dev libxdamage-dev libasound2-dev libfontconfig-dev libfreetype6-dev \
+            libspeexdsp-dev libudev-dev libv4l-dev libva-dev libpci-dev libdrm-dev \
+            nlohmann-json3-dev libwebsocketpp-dev libasio-dev libqrcodegencpp-dev \
+            librist-dev libsrt-openssl-dev zlib1g-dev \
+            qt6-base-dev libqt6svg6-dev qt6-base-private-dev qt6-wayland
+          # Nice-to-have extras: skip any that aren't available on this architecture
+          for p in libjack-jackd2-dev libsndio-dev libffmpeg-nvenc-dev libvpl-dev librnnoise-dev; do
+            sudo apt-get install -y --no-install-recommends "$p" || echo "::warning::skipped optional package $p"
+          done
+
+      - name: Build mbedTLS 3 (static) 🔐
+        # Ubuntu 24.04 ships mbedTLS 2.28; OBS 33 needs 3.x
+        run: |
+          git clone --depth 1 --branch v3.6.2 --recurse-submodules --shallow-submodules \
+            https://github.com/Mbed-TLS/mbedtls.git /tmp/mbedtls
+          cmake -S /tmp/mbedtls -B /tmp/mbedtls/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF \
+            -DMBEDTLS_FATAL_WARNINGS=OFF \
+            -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF \
+            -DCMAKE_INSTALL_PREFIX=/opt/mbedtls3
+          cmake --build /tmp/mbedtls/build
+          sudo cmake --install /tmp/mbedtls/build
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fetch version tags 🏷️
+        run: |
+          git fetch --force https://github.com/obsproject/obs-studio.git "refs/tags/*:refs/tags/*"
+          git tag -l '*-build-*' | xargs -r git tag -d
+
+      - name: Build Siegfried 🧱
+        env:
+          KICK_CLIENT_SECRET: ${{ secrets.KICK_CLIENT_SECRET }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+        run: |
+          extra=""
+          if ! pkg-config --exists ffnvcodec; then extra="$extra -DENABLE_NVENC=OFF"; fi
+          if [ "${{ matrix.arch }}" != amd64 ]; then extra="$extra -DENABLE_QSV11=OFF"; fi
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX=/opt/siegfried \
+            -DCMAKE_PREFIX_PATH=/opt/mbedtls3 \
+            -DENABLE_RELOCATABLE=ON \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+            -DENABLE_BROWSER=OFF -DENABLE_AJA=OFF -DENABLE_WEBRTC=OFF \
+            -DENABLE_VLC=OFF -DENABLE_LIBFDK=OFF $extra
+          cmake --build build
+          DESTDIR="$PWD/stage" cmake --install build
+
+      - name: Make .deb package 📦
+        run: |
+          version=$(git describe --tags --always)
+          debver=$(echo "$version" | sed -E 's/-([0-9]+)-g/+r\1.g/; s/-/~/g')
+          arch=$(dpkg --print-architecture)
+          root="$PWD/deb"
+          cp -a stage "$root"
+          rm -rf "$root/opt/siegfried/share/applications" "$root/opt/siegfried/share/metainfo"
+
+          # Launcher on PATH and an app-menu entry
+          mkdir -p "$root/usr/bin" "$root/usr/share/applications" "$root/DEBIAN"
+          ln -s /opt/siegfried/bin/obs "$root/usr/bin/siegfried"
+          cat > "$root/usr/share/applications/siegfried.desktop" <<DESKTOP
+          [Desktop Entry]
+          Type=Application
+          Name=Siegfried
+          GenericName=Streaming Studio
+          Comment=Multistream and multichat streaming studio (OBS Studio fork)
+          Exec=/opt/siegfried/bin/obs
+          Icon=/opt/siegfried/share/icons/hicolor/256x256/apps/com.obsproject.Studio.png
+          Terminal=false
+          Categories=AudioVideo;Recorder;Video;
+          StartupWMClass=obs
+          DESKTOP
+          sed -i 's/^ *//' "$root/usr/share/applications/siegfried.desktop"
+
+          # Work out the library packages it needs
+          mkdir -p shl/debian
+          printf 'Source: siegfried\n\nPackage: siegfried\nArchitecture: any\n' > shl/debian/control
+          files=$(find "$root/opt" -type f \( -name '*.so*' -o -perm -u+x \) -exec sh -c 'file -b "$1" | grep -q ELF' _ {} \; -print)
+          (cd shl && dpkg-shlibdeps -O --ignore-missing-info -l"$root/opt/siegfried/lib" \
+            -l"$root/opt/siegfried/lib/obs-plugins" $files) > shlibs.txt
+          depends=$(sed -n 's/^shlibs:Depends=//p' shlibs.txt)
+          [ -n "$depends" ] && depends="$depends, "
+          depends="${depends}qt6-wayland, qt6-qpa-plugins"
+
+          cat > "$root/DEBIAN/control" <<CONTROL
+          Package: siegfried
+          Version: $debver
+          Architecture: $arch
+          Maintainer: Weaver <silkvain@users.noreply.github.com>
+          Depends: $depends
+          Section: video
+          Priority: optional
+          Homepage: https://github.com/Silkvain/obs-studio
+          Description: Streaming studio with native multistreaming and multichat
+           A fork of OBS Studio. Installs to /opt/siegfried, alongside regular OBS.
+          CONTROL
+          sed -i 's/^          //' "$root/DEBIAN/control"
+          cat "$root/DEBIAN/control"
+
+          mkdir -p dist
+          dpkg-deb --root-owner-group -Zxz --build "$root" "dist/siegfried_${debver}_${arch}.deb"
+          ls -la dist
+
+      - name: Upload Ubuntu package 📡
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: siegfried-ubuntu-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
   release:
     name: Publish release 🚀
-    needs: [windows-x64, linux-arch]
+    needs: [windows-x64, linux-arch, linux-ubuntu]
     # Windows is usually skipped; publish whenever Linux built and Windows
     # either built or wasn't asked for
     if: >-
@@ -223,6 +363,8 @@ jobs:
 
           **Windows:** run \`Siegfried-Setup-$VERSION.exe\`. It installs alongside regular OBS (separate folder, same settings). Not code-signed yet, so SmartScreen may warn: *More info → Run anyway*.
           Portable: unzip \`Siegfried-Portable-$VERSION.zip\` and run \`bin\\64bit\\obs64.exe\`.
+
+          **Ubuntu 24.04:** \`sudo apt install ./siegfried_*_amd64.deb\` (Intel/AMD) or \`./siegfried_*_arm64.deb\` (ARM, e.g. a VM on an Apple Silicon Mac).
 
           **Linux (Arch / CachyOS):** \`sudo pacman -U siegfried-*.pkg.tar.zst\`, then open *Siegfried* from your app menu (or run \`siegfried\`). Installs to /opt/siegfried, alongside the regular obs-studio package.
 
