@@ -18,7 +18,8 @@ endif()
 if(ENABLE_RELOCATABLE)
   set(OBS_EXECUTABLE_RPATH "$ORIGIN/;$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
   set(OBS_LIBRARY_RPATH "$ORIGIN/")
-  set(OBS_MODULE_RPATH "$ORIGIN/;$ORIGIN/..")
+  # Core modules sit in <libdir>/obs-modules/core, two levels below libobs
+  set(OBS_MODULE_RPATH "$ORIGIN/;$ORIGIN/../..;$ORIGIN/..")
 endif()
 
 set(OBS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/rundir")
