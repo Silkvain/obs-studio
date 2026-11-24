@@ -1,7 +1,7 @@
 name: Siegfried Build
 run-name: Siegfried build ⚔️ (${{ github.ref_name }})
 
-# Builds Siegfried for Linux (Arch/CachyOS package, Ubuntu 24.04 .debs for
+# Builds Siegfried for Linux (Arch/CachyOS package, Ubuntu 26.10 .debs for
 # amd64 and arm64) on every push to the
 # "multistream" branch and publishes it as a GitHub Release.
 # Windows (installer + portable zip) is only built on request: Actions tab ▸
@@ -187,8 +187,11 @@ jobs:
           if-no-files-found: error
 
   linux-ubuntu:
-    name: Linux (Ubuntu 24.04 ${{ matrix.arch }}) 🐧
+    name: Linux (Ubuntu 26.10 ${{ matrix.arch }}) 🐧
     runs-on: ${{ matrix.runner }}
+    # Siegfried needs FFmpeg 8, which 24.04 doesn't have; build on the release
+    # people actually run so the package's library versions match
+    container: ubuntu:26.10
     strategy:
       fail-fast: false
       matrix:
@@ -197,31 +200,34 @@ jobs:
             arch: amd64
           - runner: ubuntu-24.04-arm
             arch: arm64
+    env:
+      DEBIAN_FRONTEND: noninteractive
     steps:
       - name: Install build dependencies 📦
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config extra-cmake-modules git dpkg-dev \
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git file build-essential cmake ninja-build pkg-config extra-cmake-modules dpkg-dev \
             libglib2.0-dev libcurl4-openssl-dev \
             libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev \
             libswresample-dev libswscale-dev libjansson-dev libx11-xcb-dev libgles2-mesa-dev \
             libwayland-dev libpipewire-0.3-dev libpulse-dev libx264-dev libgl1-mesa-dev \
-            uthash-dev libsimde-dev libluajit-5.1-dev python3-dev swig \
+            libluajit-5.1-dev python3-dev swig \
             libx11-dev libxcb-randr0-dev libxcb-shm0-dev libxcb-xinerama0-dev libxcb-composite0-dev \
-            libxinerama-dev libxcb1-dev libxcb-xfixes0-dev libxss-dev libglvnd-dev libxkbcommon-dev \
+            libxinerama-dev libxcb1-dev libxcb-xfixes0-dev libglvnd-dev libxkbcommon-dev \
             libxcomposite-dev libxdamage-dev libasound2-dev libfontconfig-dev libfreetype6-dev \
             libspeexdsp-dev libudev-dev libv4l-dev libva-dev libpci-dev libdrm-dev \
-            nlohmann-json3-dev libwebsocketpp-dev libasio-dev libqrcodegencpp-dev \
-            librist-dev libsrt-openssl-dev zlib1g-dev \
-            qt6-base-dev libqt6svg6-dev qt6-base-private-dev qt6-wayland
-          # Nice-to-have extras: skip any that aren't available on this architecture
-          for p in libjack-jackd2-dev libsndio-dev libffmpeg-nvenc-dev libvpl-dev librnnoise-dev; do
-            sudo apt-get install -y --no-install-recommends "$p" || echo "::warning::skipped optional package $p"
+            nlohmann-json3-dev zlib1g-dev \
+            qt6-base-dev libqt6svg6-dev qt6-base-private-dev
+          # Extras: skip any that aren't available (names/arches vary between releases)
+          for p in uthash-dev libsimde-dev libqrcodegencpp-dev libwebsocketpp-dev libasio-dev \
+                   librist-dev libsrt-openssl-dev libxss-dev libjack-jackd2-dev libsndio-dev \
+                   libffmpeg-nvenc-dev libvpl-dev librnnoise-dev qt6-wayland; do
+            apt-get install -y --no-install-recommends "$p" || echo "::warning::skipped optional package $p"
           done
 
       - name: Build mbedTLS 3 (static) 🔐
-        # Ubuntu 24.04 ships mbedTLS 2.28; OBS 33 needs 3.x
+        # Links the same mbedTLS 3.6 as the Arch build, whatever Ubuntu ships
         run: |
           git clone --depth 1 --branch v3.6.2 --recurse-submodules --shallow-submodules \
             https://github.com/Mbed-TLS/mbedtls.git /tmp/mbedtls
@@ -231,7 +237,7 @@ jobs:
             -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF \
             -DCMAKE_INSTALL_PREFIX=/opt/mbedtls3
           cmake --build /tmp/mbedtls/build
-          sudo cmake --install /tmp/mbedtls/build
+          cmake --install /tmp/mbedtls/build
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -240,6 +246,7 @@ jobs:
 
       - name: Fetch version tags 🏷️
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --force https://github.com/obsproject/obs-studio.git "refs/tags/*:refs/tags/*"
           git tag -l '*-build-*' | xargs -r git tag -d
 
@@ -297,7 +304,11 @@ jobs:
             -l"$root/opt/siegfried/lib/obs-plugins" $files) > shlibs.txt
           depends=$(sed -n 's/^shlibs:Depends=//p' shlibs.txt)
           [ -n "$depends" ] && depends="$depends, "
-          depends="${depends}qt6-wayland, qt6-qpa-plugins"
+          # Qt's X11 and Wayland window plugins (not found by shlibdeps)
+          for p in qt6-qpa-plugins qt6-wayland; do
+            if apt-cache show "$p" >/dev/null 2>&1; then depends="${depends}$p, "; fi
+          done
+          depends="${depends%, }"
 
           cat > "$root/DEBIAN/control" <<CONTROL
           Package: siegfried
@@ -364,7 +375,7 @@ jobs:
           **Windows:** run \`Siegfried-Setup-$VERSION.exe\`. It installs alongside regular OBS (separate folder, same settings). Not code-signed yet, so SmartScreen may warn: *More info → Run anyway*.
           Portable: unzip \`Siegfried-Portable-$VERSION.zip\` and run \`bin\\64bit\\obs64.exe\`.
 
-          **Ubuntu 24.04:** \`sudo apt install ./siegfried_*_amd64.deb\` (Intel/AMD) or \`./siegfried_*_arm64.deb\` (ARM, e.g. a VM on an Apple Silicon Mac).
+          **Ubuntu 26.10:** \`sudo apt install ./siegfried_*_amd64.deb\` (Intel/AMD) or \`./siegfried_*_arm64.deb\` (ARM, e.g. a VM on an Apple Silicon Mac).
 
           **Linux (Arch / CachyOS):** \`sudo pacman -U siegfried-*.pkg.tar.zst\`, then open *Siegfried* from your app menu (or run \`siegfried\`). Installs to /opt/siegfried, alongside the regular obs-studio package.
 
